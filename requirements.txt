@@ -1,0 +1,19 @@
+# Spotify Data Extraction
+spotipy
+lyricsgenius
+python-dotenv
+
+# Data Analysis
+pandas
+numpy
+
+# Vector Database & Embeddings
+chromadb
+sentence-transformers
+
+# Local LLM Integration
+ollama
+
+# Web UI & Visualization
+streamlit
+plotly
