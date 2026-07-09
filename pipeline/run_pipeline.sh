@@ -14,5 +14,5 @@ echo "syncing dependencies"
 pip install -r pipeline/requirements.txt
 
 echo "running spotify ingestion script"
-python pipeline/main.py
+PYTHONPATH=. python pipeline/ingest.py
 
