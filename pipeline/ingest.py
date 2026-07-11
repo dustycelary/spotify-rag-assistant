@@ -6,11 +6,13 @@ from pathlib import (
 )
 
 import dotenv
+import psycopg2
 import spotipy
 from spotipy.oauth2 import (
     SpotifyOAuth,
 )
 
+from utils.db import init_db
 from utils.spotify_helpers import get_top_track_uri, remove_keys_recursive, save_json
 
 dotenv.load_dotenv()
@@ -108,4 +110,6 @@ def main():
 
 
 if __name__ == "__main__":
+    conn = psycopg2.connect("postgresql://dev_user:dev_password@db:5432/spotify_rag")
+    init_db(conn)
     main()
