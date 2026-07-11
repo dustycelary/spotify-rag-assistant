@@ -1,9 +1,6 @@
 import logging
 import os
 import sys
-from pathlib import (
-    Path,
-)
 
 import dotenv
 import psycopg2
@@ -13,7 +10,6 @@ from spotipy.oauth2 import (
 )
 
 from utils.db import init_db
-from utils.spotify_helpers import get_top_track_uri, remove_keys_recursive, save_json
 
 dotenv.load_dotenv()
 CLIENT_ID = os.environ.get("client_id")
@@ -79,34 +75,9 @@ def main():
     sp = authenticate_user()
     logger.info("Authentication successful.")
 
-    # working test
-    data_home = Path(__file__).resolve().parent.parent / "test_data"
-
-    recently_played_path = data_home / "recently_played.json"
-    recently_played_tracks = sp.current_user_recently_played()
-    cleaned_tracks = remove_keys_recursive(
-        recently_played_tracks, {"available_markets"}
-    )
-    save_json(cleaned_tracks, recently_played_path)
-
-    query = "Bohemian rapsody Queen"
-    logger.info("Searching for track: '%s'", query)
-    rapsody_uri = get_top_track_uri(
-        sp,
-        query,
-    )
-
-    if rapsody_uri:
-        logger.info("Adding track to playback queue: %s", rapsody_uri)
-
-        try:
-            sp.add_to_queue(rapsody_uri)
-
-        except Exception as e:
-            logger.error("Failed to add track due to error: %s", e)
-
-    else:
-        logger.warning("Could not add track to queue: URI is missing.")
+    # data_home = Path(__file__).resolve().parent.parent / "test_data"
+    # recently_played_path = data_home / "recently_played.json"
+    # recents = get_recently_played_tracks(sp, recently_played_path)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,64 @@ def remove_keys_recursive(data, keys_to_remove: set | list) -> any:
     return data
 
 
+def add_track_to_queue(sp: spotipy.Spotify, track_query: str):
+    """Gets closest matching track to query and adds it to queue of current user"""
+
+    logger.info("Searching for track: '%s'", track_query)
+    rapsody_uri = get_top_track_uri(
+        sp,
+        track_query,
+    )
+
+    if rapsody_uri:
+        logger.info("Adding track to playback queue: %s", rapsody_uri)
+
+        try:
+            sp.add_to_queue(rapsody_uri)
+
+        except Exception as e:
+            logger.error("Failed to add track due to error: %s", e)
+
+    else:
+        logger.warning("Could not add track to queue: URI is missing.")
+
+
+def get_recently_played_tracks(
+    sp: spotipy.Spotify,
+    save_path=None,
+    remove_markets: bool = True,
+    **kwargs,
+) -> dict:
+    """Fetch and optionally persist the current user's recently played tracks.
+
+    Args:
+        sp: Authenticated Spotipy client.
+        track_limit: Maximum number of tracks to request from Spotify.
+        save_path: Optional path to save the returned payload as JSON.
+        remove_markets: Remove ``available_markets`` keys from the payload when True.
+        **kwargs: Extra arguments forwarded to
+            ``sp.current_user_recently_played`` (for example ``limit``, ``before`` and
+            ``after``). Unsupported keys are handled by Spotipy/Spotify API errors.
+
+    Returns:
+        The recently played tracks payload returned by the Spotify API.
+    """
+    logger.info("Looking for recently played tracks")
+    recently_played_tracks = sp.current_user_recently_played(**kwargs)
+    if remove_markets:
+        logger.info("Getting rid of available_markets key for recently played tracks")
+        recently_played_tracks = remove_keys_recursive(
+            recently_played_tracks, {"available_markets"}
+        )
+
+    if save_path:
+        # data_home = Path(__file__).resolve().parent.parent / "test_data"
+        # recently_played_path = data_home / "recently_played.json"
+        save_json(recently_played_tracks, save_path)
+
+    return recently_played_tracks
+
+
 def save_json(data, file_path: Path | str) -> bool:
     """Saves a python json object to json file.
 
