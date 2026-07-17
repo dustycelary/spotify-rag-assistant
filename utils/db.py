@@ -8,7 +8,10 @@ logger = logging.getLogger(__name__)
 
 UTILS_DIR = Path(__file__).resolve().parent
 
-SCHEMA_PATH = UTILS_DIR.parent / "pipeline" / "schema.sql"
+SCHEMA_DIR = UTILS_DIR.parent / "pipeline" / "schema"
+
+# TODO: create teh methods and calss for tracks repository, (the SOLID principle idea)
+# NOTE: plan out all the method signatures before doing htem
 
 
 class BaseRepository(ABC):
@@ -26,11 +29,39 @@ class BaseRepository(ABC):
 
 
 def init_db(conn: psycopg2.extensions.connection):
-    with conn.cursor() as cur:
-        with open(SCHEMA_PATH) as f:
-            schema_sql = f.read()
+    """Initializes the database by executing all schema files sequentially.
 
-        cur.execute(schema_sql)
+    This function scans the designated schema directory, sorts the SQL files
+    alphabetically, and runs them inside a single database transaction. If
+    any file fails to execute, the entire transaction is rolled back.
 
-    conn.commit()
-    logger.info("Database tables have been created")
+    Args:
+        conn (psycopg2.extensions.connection): An active database connection object.
+
+    Raises:
+        FileNotFoundError: If the schema directory does not exist or contains no files.
+        psycopg2.DatabaseError: If a SQL syntax error or constraint violation occurs
+            while executing the schema files.
+    """
+    try:
+        sql_files = sorted(SCHEMA_DIR.glob("*.sql"))
+        if not sql_files:
+            logger.warning(f"No sql files found in directory {SCHEMA_DIR}")
+            return
+
+        with conn.cursor() as cur:
+            for file_path in sql_files:
+                logger.info(f"Executing schema file: {file_path}")
+
+                with open(file_path) as f:
+                    schema_sql = f.read()
+
+                cur.execute(schema_sql)
+
+        conn.commit()
+        logger.info("Database tables have been created")
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Failed to initialise database: {e}")
+        raise e
