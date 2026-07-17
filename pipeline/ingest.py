@@ -11,6 +11,8 @@ from spotipy.oauth2 import (
 
 from utils.db import init_db
 
+# TODO: adding spotify api so mac can set GET http requests
+# TODO: add a feature allowing someone to import data from spotify, so app can have whole history
 dotenv.load_dotenv()
 CLIENT_ID = os.environ.get("client_id")
 CLIENT_SECRET = os.environ.get("client_secret")
@@ -62,6 +64,7 @@ def authenticate_user() -> spotipy.Spotify:
 
 def main():
     # Configure global logging settings
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -70,6 +73,11 @@ def main():
             logging.FileHandler("app.log", mode="a"),
         ],
     )
+    db_host = os.environ.get("DB_HOST", "localhost")
+    conn = psycopg2.connect(
+        f"postgresql://dev_user:dev_password@{db_host}:5432/spotify_rag"
+    )
+    init_db(conn)
 
     logger.info("Starting ingest pipeline...")
     sp = authenticate_user()
@@ -81,6 +89,4 @@ def main():
 
 
 if __name__ == "__main__":
-    conn = psycopg2.connect("postgresql://dev_user:dev_password@db:5432/spotify_rag")
-    init_db(conn)
     main()

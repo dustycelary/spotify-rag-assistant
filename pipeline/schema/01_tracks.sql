@@ -1,4 +1,3 @@
--- TODO: add all tables to schema (plan)
 -- TODO: add a way to import spotify data
 
 CREATE TABLE IF NOT EXISTS tracks (
