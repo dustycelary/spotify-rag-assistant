@@ -4,12 +4,16 @@ from pathlib import Path
 
 import psycopg2
 
+from utils.track import Track
+
 logger = logging.getLogger(__name__)
 
 UTILS_DIR = Path(__file__).resolve().parent
 
 SCHEMA_DIR = UTILS_DIR.parent / "pipeline" / "schema"
 
+# TODO: make function to get track lyrics
+# TODO: add testing
 # TODO: create teh methods and calss for tracks repository, (the SOLID principle idea)
 # NOTE: plan out all the method signatures before doing htem
 
@@ -26,6 +30,22 @@ class BaseRepository(ABC):
     def get_by_id(self, entity_id) -> dict:
         """Retries entity by id string"""
         pass
+
+
+class SqlTracksRepository(BaseRepository):
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
+        self.conn = conn
+
+    def add(self, track: Track) -> None:
+        query = """
+            INSERT INTO tracks (id, title, artist, lyrics)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING;
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query, (track.id, track.title, track.artist, track.lyrics))
+        self.conn.commit()
 
 
 def init_db(conn: psycopg2.extensions.connection):
