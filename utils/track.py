@@ -4,8 +4,8 @@ from datetime import datetime
 
 @dataclass
 class Track:
-    id: str
+    uri: str
     name: str
     artist: str
-    lyrics: str
+    lyrics: str | None = None
     release_date: datetime

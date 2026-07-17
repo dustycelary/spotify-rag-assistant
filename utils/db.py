@@ -38,13 +38,15 @@ class SqlTracksRepository(BaseRepository):
 
     def add(self, track: Track) -> None:
         query = """
-            INSERT INTO tracks (id, title, artist, lyrics)
+            INSERT INTO tracks (uri, title, artist, release_date)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (id) DO NOTHING;
         """
 
         with self.conn.cursor() as cur:
-            cur.execute(query, (track.id, track.title, track.artist, track.lyrics))
+            cur.execute(
+                query, (track.id, track.title, track.artist, track.release_date)
+            )
         self.conn.commit()
 
 
