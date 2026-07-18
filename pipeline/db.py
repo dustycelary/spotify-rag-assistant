@@ -4,13 +4,12 @@ from pathlib import Path
 
 import psycopg2
 
-from utils.track import Track
+from pipeline.domain.track import Track
 
 logger = logging.getLogger(__name__)
 
-UTILS_DIR = Path(__file__).resolve().parent
-
-SCHEMA_DIR = UTILS_DIR.parent / "pipeline" / "schema"
+PIPELINE_DIR = Path(__file__).resolve().parent
+SCHEMA_DIR = PIPELINE_DIR / "schema"
 
 # TODO: make function to get track lyrics
 # TODO: add testing
@@ -40,14 +39,30 @@ class SqlTracksRepository(BaseRepository):
         query = """
             INSERT INTO tracks (uri, title, artist, release_date)
             VALUES (%s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING;
+            ON CONFLICT (uri) DO NOTHING;
         """
 
         with self.conn.cursor() as cur:
             cur.execute(
-                query, (track.id, track.title, track.artist, track.release_date)
+                query, (track.uri, track.name, track.artist, track.release_date)
             )
         self.conn.commit()
+
+    def get_by_id(self, entity_id: str) -> dict | None:
+        query = """
+            SELECT uri, title, artist, release_date FROM tracks WHERE uri = %s;
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(query, (entity_id,))
+            row = cur.fetchone()
+            if row:
+                return {
+                    "uri": row[0],
+                    "title": row[1],
+                    "artist": row[2],
+                    "release_date": row[3]
+                }
+        return None
 
 
 def init_db(conn: psycopg2.extensions.connection):

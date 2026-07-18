@@ -7,5 +7,6 @@ class Track:
     uri: str
     name: str
     artist: str
-    lyrics: str | None = None
     release_date: datetime
+    lyrics: str | None = None
+

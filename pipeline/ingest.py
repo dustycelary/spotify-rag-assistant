@@ -9,10 +9,11 @@ from spotipy.oauth2 import (
     SpotifyOAuth,
 )
 
-from utils.db import init_db
+from pipeline.db import init_db
 
 # TODO: adding spotify api so mac can set GET http requests
-# TODO: add a feature allowing someone to import data from spotify, so app can have whole history
+# TODO: add a feature allowing someone to import data from spotify,
+# so app can have whole history
 dotenv.load_dotenv()
 CLIENT_ID = os.environ.get("client_id")
 CLIENT_SECRET = os.environ.get("client_secret")
@@ -80,7 +81,7 @@ def main():
     init_db(conn)
 
     logger.info("Starting ingest pipeline...")
-    sp = authenticate_user()
+    sp = authenticate_user()  # noqa: F841
     logger.info("Authentication successful.")
 
     # data_home = Path(__file__).resolve().parent.parent / "test_data"
