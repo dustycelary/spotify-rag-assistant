@@ -3,8 +3,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import psycopg2
-
-from pipeline.domain.track import Track
+from pipeline.track import Track
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class SqlTracksRepository(BaseRepository):
                     "uri": row[0],
                     "title": row[1],
                     "artist": row[2],
-                    "release_date": row[3]
+                    "release_date": row[3],
                 }
         return None
 
