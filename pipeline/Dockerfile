@@ -4,7 +4,7 @@ WORKDIR /app
 
 ENV PYTHONPATH=/app
 
-COPY pipeline/requirements.txt .
+COPY requirements.txt .
 RUN pip install --default-timeout=100 --retries 5 -r requirements.txt
 
 COPY . .
