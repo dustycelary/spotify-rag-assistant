@@ -1,15 +1,22 @@
 import logging
 import os
 import sys
+from pathlib import Path
+
+# Ensure project root is in the path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import dotenv
 import psycopg2
 import spotipy
+from pipeline.db import init_db
 from spotipy.oauth2 import (
     SpotifyOAuth,
 )
 
-from pipeline.db import init_db
+from rag import ragcontroller
 
 # TODO: adding spotify api so mac can set GET http requests
 # TODO: add a feature allowing someone to import data from spotify,
@@ -67,7 +74,7 @@ def main():
     # Configure global logging settings
 
     logging.basicConfig(
-        level=logging.INFO,
+        # level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
@@ -83,6 +90,9 @@ def main():
     logger.info("Starting ingest pipeline...")
     sp = authenticate_user()  # noqa: F841
     logger.info("Authentication successful.")
+    user_question = input("What would you like to know about your spotify data?: ")
+    rag = ragcontroller.RagController(conn)
+    print(f"RESPONSE:\n\n {rag.query(user_question)}")
 
     # data_home = Path(__file__).resolve().parent.parent / "test_data"
     # recently_played_path = data_home / "recently_played.json"
