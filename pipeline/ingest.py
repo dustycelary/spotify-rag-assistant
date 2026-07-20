@@ -3,20 +3,21 @@ import os
 import sys
 from pathlib import Path
 
+import dotenv
+import psycopg2
+import spotipy
+from spotipy.oauth2 import (
+    SpotifyOAuth,
+)
+
+from pipeline.db import init_db
+from rag import ragcontroller
+
 # Ensure project root is in the path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import dotenv
-import psycopg2
-import spotipy
-from pipeline.db import init_db
-from spotipy.oauth2 import (
-    SpotifyOAuth,
-)
-
-from rag import ragcontroller
 
 # TODO: adding spotify api so mac can set GET http requests
 # TODO: add a feature allowing someone to import data from spotify,

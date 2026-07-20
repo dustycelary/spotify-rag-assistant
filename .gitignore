@@ -2,7 +2,7 @@ notes/
 test/
 .spotify_token_cache
 .DS_Store
-scratch/
+playground/
 
 
 # Byte-compiled / optimized / DLL files
