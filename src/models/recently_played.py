@@ -1,0 +1,27 @@
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from src.db import Base
+
+
+class RecentlyPlayed(Base):
+    __tablename__ = "recently_played"
+    __table_args__ = (UniqueConstraint("track_uri", "played_at", name="unique_play"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    track_uri = Column(String(255), ForeignKey("tracks.uri", ondelete="CASCADE"))
+    played_at = Column(DateTime(timezone=True), nullable=False)
+    context_type = Column(String(50))
+    context_uri = Column(String(255))
+    inserted_at = Column(DateTime, server_default=func.current_timestamp())
+
+    # Relationships
+    track = relationship("Track", back_populates="recently_played")

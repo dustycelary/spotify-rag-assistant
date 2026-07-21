@@ -10,6 +10,8 @@ pandas
 # Vector Database & Embeddings
 sentence-transformers
 psycopg2-binary
+sqlalchemy
+pgvector
 
 # Local LLM Integration
 ollama
