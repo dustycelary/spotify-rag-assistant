@@ -4,14 +4,14 @@ import sys
 from pathlib import Path
 
 import dotenv
-import psycopg2
 import spotipy
 from spotipy.oauth2 import (
     SpotifyOAuth,
 )
 
-from pipeline.db import init_db
-from rag import ragcontroller
+from rag import embed_text, generate_user_response
+from repositories.vector_repository import PgVectorRepository
+from src.db import SessionLocal, engine, init_db
 
 # Ensure project root is in the path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -19,9 +19,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-# TODO: adding spotify api so mac can set GET http requests
-# TODO: add a feature allowing someone to import data from spotify,
-# so app can have whole history
 dotenv.load_dotenv()
 CLIENT_ID = os.environ.get("client_id")
 CLIENT_SECRET = os.environ.get("client_secret")
@@ -82,22 +79,36 @@ def main():
             logging.FileHandler("app.log", mode="a"),
         ],
     )
-    db_host = os.environ.get("DB_HOST", "localhost")
-    conn = psycopg2.connect(
-        f"postgresql://dev_user:dev_password@{db_host}:5432/spotify_rag"
-    )
-    init_db(conn)
+
+    logger.info("Initializing database...")
+    init_db(engine)
 
     logger.info("Starting ingest pipeline...")
     sp = authenticate_user()  # noqa: F841
     logger.info("Authentication successful.")
-    user_question = input("What would you like to know about your spotify data?: ")
-    rag = ragcontroller.RagController(conn)
-    print(f"RESPONSE:\n\n {rag.query(user_question)}")
 
-    # data_home = Path(__file__).resolve().parent.parent / "test_data"
-    # recently_played_path = data_home / "recently_played.json"
-    # recents = get_recently_played_tracks(sp, recently_played_path)
+    print("Ready! Type 'exit' or 'quit' to stop.")
+    while True:
+        user_question = input("What would you like to know about your spotify data?: ")
+        if user_question.strip().lower() in ["exit", "quit"]:
+            break
+
+        with SessionLocal() as session:
+            query_vector = embed_text(text=user_question)
+            vector_repository = PgVectorRepository(session)
+            similar_tracks = vector_repository.search_similar_lyrics(query_vector)
+
+            user_response = generate_user_response(
+                user_question, context=similar_tracks
+            )
+            print(f"RESPONSE:\n\n {user_response}")
+
+            # rag = rag.RagController(session)
+            # print(f"RESPONSE:\n\n {rag.query(user_question)}")
+
+        # data_home = Path(__file__).resolve().parent.parent / "test_data"
+        # recently_played_path = data_home / "recently_played.json"
+        # recents = get_recently_played_tracks(sp, recently_played_path)
 
 
 if __name__ == "__main__":

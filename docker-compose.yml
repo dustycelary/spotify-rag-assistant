@@ -19,24 +19,30 @@ services:
 
   ingest:
     container_name: ingest
+    profiles:
+      - cli
     build:
-      context: ..
-      dockerfile: pipeline/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     env_file:
-      - ../.env
+      - .env
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
 
     environment:
-      - CLIENT_ID=${client_id}
-      - CLIENT_SECRET=${client_secret}
-      - REDIRECT_URI=${redirect_uri}
       - DB_HOST=db
+      - OLLAMA_HOST=http://host.docker.internal:11434
 
     volumes:
       - ../logs:/app/logs
       - ../test_data:/app/test_data
+      - ./.spotify_token_cache:/app/.spotify_token_cache
+      - ./src:/app/src
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  hf_cache:

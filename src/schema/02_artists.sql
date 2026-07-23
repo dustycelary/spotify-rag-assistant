@@ -1,7 +1,0 @@
-CREATE TABLE IF NOT EXISTS artists (
-    uri VARCHAR(255) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    genres VARCHAR(255)[],
-    popularity INTEGER,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
