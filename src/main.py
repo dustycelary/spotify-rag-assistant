@@ -9,8 +9,8 @@ from spotipy.oauth2 import (
     SpotifyOAuth,
 )
 
-from rag import embed_text, generate_user_response
-from repositories.vector_repository import PgVectorRepository
+from agent_tools import AgentTools
+from rag import generate_user_response
 from src.db import SessionLocal, engine, init_db
 
 # Ensure project root is in the path
@@ -94,9 +94,8 @@ def main():
             break
 
         with SessionLocal() as session:
-            query_vector = embed_text(text=user_question)
-            vector_repository = PgVectorRepository(session)
-            similar_tracks = vector_repository.search_similar_lyrics(query_vector)
+            tools = AgentTools(session)
+            similar_tracks = tools.search_lyrics_by_keyword(user_question)
 
             user_response = generate_user_response(
                 user_question, context=similar_tracks
