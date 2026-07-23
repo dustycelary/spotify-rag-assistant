@@ -1,7 +1,12 @@
-# TODO: talk about the coding practices and standards im putting in and enforcing. 
 [tool.ruff]
 line-length=88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4"]
 ignore = []
+
+
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
