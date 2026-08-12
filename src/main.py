@@ -1,28 +1,25 @@
 import logging
 import os
 import sys
-from pathlib import Path
 
 import dotenv
 import spotipy
-from spotipy.oauth2 import (
-    SpotifyOAuth,
-)
+from sentence_transformers import SentenceTransformer
+from spotipy.oauth2 import SpotifyOAuth
 
-from agent_tools import AgentTools
-from rag import generate_user_response
+from src.agent_context import describe_schema
+from src.agent_tools import answer_question
 from src.db import SessionLocal, engine, init_db
 
-# Ensure project root is in the path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-
 dotenv.load_dotenv()
+logger = logging.getLogger(__name__)
+
+MODEL_NAME = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME")
 CLIENT_ID = os.environ.get("client_id")
 CLIENT_SECRET = os.environ.get("client_secret")
 REDIRECT_URI = os.environ.get("redirect_uri")
+CACHE_PATH = ".spotify_token_cache"
 PI_SCOPES = (
     "user-modify-playback-state "
     "user-library-read "
@@ -33,9 +30,6 @@ PI_SCOPES = (
     "user-top-read "
     "user-read-recently-played"
 )
-CACHE_PATH = ".spotify_token_cache"
-
-logger = logging.getLogger(__name__)
 
 
 def authenticate_user() -> spotipy.Spotify:
@@ -72,42 +66,45 @@ def main():
     # Configure global logging settings
 
     logging.basicConfig(
-        # level=logging.INFO,
+        level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler("app.log", mode="a"),
         ],
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+    logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
     logger.info("Initializing database...")
     init_db(engine)
+    schema_layout = describe_schema(engine)
 
     logger.info("Starting ingest pipeline...")
-    sp = authenticate_user()  # noqa: F841
-    logger.info("Authentication successful.")
+    # sp = authenticate_user()
+    # logger.info("Authentication successful.")
 
+    # from src.helpers import sync_spotify_to_db
+    #
+    # sync_spotify_to_db(sp)
+
+    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+    logger.info(f"Using Ollama LLM model: {ollama_model}")
     print("Ready! Type 'exit' or 'quit' to stop.")
     while True:
-        user_question = input("What would you like to know about your spotify data?: ")
-        if user_question.strip().lower() in ["exit", "quit"]:
+        user_question = input(
+            "What would you like to know about your spotify data?: "
+        ).strip()
+        if not user_question:
+            continue
+        if user_question.lower() in ["exit", "quit"]:
             break
 
         with SessionLocal() as session:
-            tools = AgentTools(session)
-            similar_tracks = tools.search_lyrics_by_keyword(user_question)
-
-            user_response = generate_user_response(
-                user_question, context=similar_tracks
-            )
-            print(f"RESPONSE:\n\n {user_response}")
-
-            # rag = rag.RagController(session)
-            # print(f"RESPONSE:\n\n {rag.query(user_question)}")
-
-        # data_home = Path(__file__).resolve().parent.parent / "test_data"
-        # recently_played_path = data_home / "recently_played.json"
-        # recents = get_recently_played_tracks(sp, recently_played_path)
+            ans = answer_question(user_question, session, model, schema_layout)
+            print(f"\n{ans}\n")
 
 
 if __name__ == "__main__":
