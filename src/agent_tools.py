@@ -1,38 +1,61 @@
 import json
 import logging
 import os
+import re
+from datetime import datetime
+from typing import Any
 
 import dotenv
 import ollama
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from src.agent_context import SYSTEM_PROMPT, TOOLS
+from src.agent_context import TOOLS, build_system_prompt
 from src.models.embedding import Embedding
 from src.models.track import Track
 
 dotenv.load_dotenv()
 MODEL_NAME = os.environ.get("OLLAMA_MODEL", "llama3.2")
 logger = logging.getLogger(__name__)
-MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS"))
-
+MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS", "6"))
 
 OLLAMA_OPTIONS = {"temperature": 0.1, "num_predict": 2048, "num_ctx": 8192}
+NO_TOOL_RECOVERY = (
+    "Before answering this Spotify-data request, call the appropriate tool. Use "
+    "`run_sql_query` for listening-history facts, dates, counts, rankings, metadata, "
+    "genres, or audio features. Use `semantic_search` for subjective discovery from "
+    "qualities the user supplied. For similarity to a named track, retrieve that "
+    "track with SQL first. Do not provide a factual final answer yet."
+)
+
+FORBIDDEN_RELATIONS = {
+    "artists",
+    "audio_features",
+    "embeddings",
+    "lyrics",
+    "played_history",
+    "tracks",
+    "track_artists",
+}
+
+
+def _field(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
 
 
 def answer_question(question: str, session: Session, embed_model) -> str:
-
-    user_prompt = (
-        question
-        if "in english" in question.lower()
-        else f"{question}\n(Note: Provide your response strictly in English.)"
-    )
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
+    messages: list[Any] = [
+        {
+            "role": "system",
+            "content": build_system_prompt(datetime.now().astimezone()),
+        },
+        {"role": "user", "content": question},
     ]
     total_tool_calls = 0
+    successful_tool_calls = 0
+    seen_tool_calls: set[str] = set()
 
     logger.info("=" * 60)
     logger.info("NEW QUERY: %s", question)
@@ -42,177 +65,294 @@ def answer_question(question: str, session: Session, embed_model) -> str:
         for turn in range(1, MAX_TOOL_TURNS + 1):
             logger.info("Agent Turn %d/%d: Prompting model...", turn, MAX_TOOL_TURNS)
             response = ollama.chat(
-                model=MODEL_NAME, messages=messages, tools=TOOLS, options=OLLAMA_OPTIONS
+                model=MODEL_NAME,
+                messages=messages,
+                tools=TOOLS,
+                options=OLLAMA_OPTIONS,
             )
-            # msg = response.get("message") if response else None
-            msg = getattr(response, "message", None)
+            msg = _field(response, "message")
             if not msg:
                 return "No response could be generated."
 
-            logger.info("Agent Turn %d/%d message: [%s]\n", turn, MAX_TOOL_TURNS, msg)
-            tool_calls = getattr(msg, "tool_calls", None)
+            logger.info("Agent Turn %d/%d message: [%s]", turn, MAX_TOOL_TURNS, msg)
+            tool_calls = _field(msg, "tool_calls")
 
             if not tool_calls:
-                content = getattr(msg, "content", None)
-                if turn == 1 and total_tool_calls == 0:
+                content = _field(msg, "content", "") or ""
+                if successful_tool_calls == 0:
                     logger.warning(
-                        "Turn 1 provided no tool calls. Prompting model to execute a tool query first."
+                        "Turn %d provided no answerable tool evidence; "
+                        "requesting a tool call.",
+                        turn,
                     )
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": content or "",
-                        }
-                    )
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "You must query `v_listening_history` using `run_sql_query` first "
-                                "before determining if records exist or giving a final answer. Please run a SQL query now."
-                            ),
-                        }
-                    )
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": NO_TOOL_RECOVERY})
                     continue
 
                 logger.info(
-                    "Agent completed reasoning at Turn %d/%d after %d tool call(s).",
+                    "Agent completed at Turn %d/%d after %d call(s), %d successful.",
                     turn,
                     MAX_TOOL_TURNS,
                     total_tool_calls,
+                    successful_tool_calls,
                 )
-                return (
-                    content or "No response could be generated."
-                )  # ending ai tool turns
+                return content or "No response could be generated."
 
             messages.append(msg)
             for tool_call in tool_calls:
                 total_tool_calls += 1
-                func_info = getattr(tool_call, "function", {})
-                func_name = getattr(func_info, "name", None)
-                func_args = getattr(func_info, "arguments", {})
+                func_info = _field(tool_call, "function", {})
+                func_name = _field(func_info, "name")
+                raw_args = _field(func_info, "arguments", {})
 
-                if isinstance(func_args, str):
-                    try:
-                        func_args = json.loads(func_args)
-                    except Exception:
-                        func_args = {}
-
-                call_signature = (
-                    f"{func_name}:{json.dumps(func_args, sort_keys=True, default=str)}"
-                )
-                logger.info(
-                    "Agent Turn %d/%d [Call Signature:  #%s]:\n",
-                    turn,
-                    MAX_TOOL_TURNS,
-                    call_signature,
-                )
-
-                data = []
-
-                if func_name == "run_sql_query":
-                    sql = clean_sql(func_args.get("sql", ""))
-                    logger.info(
-                        "Agent Turn %d/%d [Tool Call #%d - run_sql_query]:\n%s",
-                        turn,
-                        MAX_TOOL_TURNS,
-                        total_tool_calls,
-                        sql,
+                try:
+                    func_args = (
+                        json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     )
-                    try:
-                        data = run_structured_query(sql, session)
-                    except Exception as e:
-                        logger.error("SQL Execution Error on Turn %d: %s", turn, e)
-                        session.rollback()
-                        data = [
-                            {
-                                "error": (
-                                    f"SQL Execution Error: {e}. "
-                                    "Please rewrite the SQL query using columns from v_listening_history."
-                                )
-                            }
-                        ]
-                elif func_name == "semantic_search":
-                    query_text = func_args.get("query_text", question)
-                    logger.info(
-                        "Agent Turn %d/%d [Tool Call #%d - semantic_search]: %s",
-                        turn,
-                        MAX_TOOL_TURNS,
-                        total_tool_calls,
-                        query_text,
+                    if not isinstance(func_args, dict):
+                        raise ValueError
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    payload = {
+                        "status": "error",
+                        "error": {
+                            "code": "invalid_arguments",
+                            "message": (
+                                "Tool arguments must be a JSON object. Correct the "
+                                "call and retry."
+                            ),
+                        },
+                    }
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": func_name,
+                            "content": json.dumps(payload, separators=(",", ":")),
+                        }
                     )
-                    try:
-                        emb = embed_question(query_text, embed_model)
-                        data = semantic_search(emb, session)
-                    except Exception as e:
-                        logger.error("Semantic Search Error on Turn %d: %s", turn, e)
-                        session.rollback()
-                        data = [{"error": f"Semantic Search Error: {e}"}]
+                    continue
+
+                encoded_args = json.dumps(func_args, sort_keys=True, default=str)
+                signature = f"{func_name}:{encoded_args}"
+                if signature in seen_tool_calls:
+                    payload = {
+                        "status": "error",
+                        "error": {
+                            "code": "duplicate_call",
+                            "message": (
+                                "This exact tool call already ran. Use its earlier "
+                                "result or change the call."
+                            ),
+                        },
+                    }
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": func_name,
+                            "content": json.dumps(payload, separators=(",", ":")),
+                        }
+                    )
+                    continue
+                seen_tool_calls.add(signature)
 
                 logger.info(
-                    "Agent Turn %d/%d: Tool #%d execution returned %d item(s)",
+                    "Agent Turn %d tool call #%d: %s",
                     turn,
-                    MAX_TOOL_TURNS,
                     total_tool_calls,
-                    len(data),
+                    signature,
                 )
-                tool_msg_content = json.dumps(data, default=str, separators=(",", ":"))
-
-                if not data:
-                    tool_msg_content += (
-                        " (No matching records in database for this request.)"
+                try:
+                    if func_name == "run_sql_query":
+                        sql_arg = func_args.get("sql")
+                        if not isinstance(sql_arg, str) or not sql_arg.strip():
+                            raise ValueError("The required `sql` argument is missing.")
+                        rows = run_structured_query(sql_arg, session)
+                    elif func_name == "semantic_search":
+                        query_text = func_args.get("query_text")
+                        if not isinstance(query_text, str) or not query_text.strip():
+                            raise ValueError(
+                                "The required `query_text` argument is missing."
+                            )
+                        embedding = embed_question(query_text, embed_model)
+                        rows = semantic_search(embedding, session)
+                    else:
+                        payload = {
+                            "status": "error",
+                            "error": {
+                                "code": "unknown_tool",
+                                "message": (
+                                    f"Unknown tool `{func_name}`. Use one of the "
+                                    "provided tools."
+                                ),
+                            },
+                        }
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_name": func_name,
+                                "content": json.dumps(payload, separators=(",", ":")),
+                            }
+                        )
+                        continue
+                except ValueError as exc:
+                    logger.warning("Rejected tool call on Turn %d: %s", turn, exc)
+                    payload = {
+                        "status": "error",
+                        "error": {"code": "invalid_request", "message": str(exc)},
+                    }
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": func_name,
+                            "content": json.dumps(payload, separators=(",", ":")),
+                        }
                     )
+                    continue
+                except Exception:
+                    logger.exception("Tool execution failed on Turn %d", turn)
+                    session.rollback()
+                    code = (
+                        "sql_execution_error"
+                        if func_name == "run_sql_query"
+                        else "semantic_search_error"
+                    )
+                    message = (
+                        "The query failed. Rewrite it using only documented "
+                        "columns from v_listening_history."
+                        if func_name == "run_sql_query"
+                        else "Semantic search failed. Retry or explain that "
+                        "recommendations are unavailable."
+                    )
+                    payload = {
+                        "status": "error",
+                        "error": {"code": code, "message": message},
+                    }
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": func_name,
+                            "content": json.dumps(payload, separators=(",", ":")),
+                        }
+                    )
+                    continue
 
-                messages.append({"role": "tool", "content": tool_msg_content})
+                successful_tool_calls += 1
+                payload = {
+                    "status": "ok",
+                    "row_count": len(rows),
+                    "rows": rows,
+                }
+                logger.info(
+                    "Agent Turn %d tool #%d returned %d row(s)",
+                    turn,
+                    total_tool_calls,
+                    len(rows),
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_name": func_name,
+                        "content": json.dumps(
+                            payload, default=str, separators=(",", ":")
+                        ),
+                    }
+                )
 
-        return "Could not finish as too many tool calls have been made"
+        return "I couldn't complete the request within the available tool turns."
+    except Exception:
+        logger.exception("Ollama agent error")
+        return "Sorry, I couldn't process that query due to an agent service error."
 
-    except Exception as e:
-        logger.error(f"Ollama agent error: {e}")
-        return f"Sorry, I couldn't process that query: {e}"
+
+def clean_sql(raw: str) -> str:
+    sql = re.sub(r"^\s*```(?:sql)?\s*", "", raw, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*```\s*$", "", sql).strip()
+    if sql.endswith(";"):
+        sql = sql[:-1].strip()
+    return sql
+
+
+def validate_sql(sql: str) -> str:
+    """Apply narrow structural checks before PostgreSQL's read-only enforcement."""
+    if not sql:
+        raise ValueError("SQL cannot be empty.")
+
+    without_comments = re.sub(r"/\*.*?\*/|--[^\n]*", " ", sql, flags=re.DOTALL)
+    # Mask quoted string contents so titles such as "Delete Me" and literal
+    # semicolons are not mistaken for SQL syntax.
+    structural_sql = re.sub(r"'(?:''|[^'])*'", "''", without_comments)
+    if ";" in structural_sql:
+        raise ValueError("Only one SQL statement is allowed.")
+    normalized = structural_sql.strip().lower()
+    if not re.match(r"^(select|with)\b", normalized):
+        raise ValueError("Only SELECT or WITH ... SELECT statements are allowed.")
+    if re.search(
+        r"\b(insert|update|delete|merge|drop|alter|create|truncate)\b", normalized
+    ):
+        raise ValueError("Data-changing SQL is not allowed.")
+    if not re.search(r"\bv_listening_history\b", normalized):
+        raise ValueError("Queries must reference v_listening_history.")
+
+    identifiers = set(re.findall(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*)", normalized))
+    forbidden = sorted(identifiers & FORBIDDEN_RELATIONS)
+    if forbidden:
+        raise ValueError(
+            "Raw tables are unavailable; query only v_listening_history "
+            f"(found: {', '.join(forbidden)})."
+        )
+    return sql
 
 
 def run_structured_query(
     sql: str, session: Session, max_rows: int = 100, timeout_ms: int = 5000
 ) -> list[dict]:
-    clean_sql_str = sql.strip().lower()
-    if not (clean_sql_str.startswith("select") or clean_sql_str.startswith("with")):
-        raise ValueError("Only SELECT or WITH (CTE) SELECT statements allowed")
-
-    session.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}';"))
-    session.execute(text("SET LOCAL default_transaction_read_only = ON;"))
-    result = session.execute(text(sql))
-    return [dict(r) for r in result.mappings().fetchmany(max_rows)]
+    """Validate and execute one read-only SQL query, returning plain rows."""
+    sql = validate_sql(clean_sql(sql))
+    connection = session.connection()
+    connection.exec_driver_sql(f"SET LOCAL statement_timeout = '{int(timeout_ms)}ms'")
+    connection.exec_driver_sql("SET LOCAL default_transaction_read_only = ON")
+    result = connection.exec_driver_sql(sql)
+    return [dict(row) for row in result.mappings().fetchmany(max_rows)]
 
 
 def semantic_search(
     embedding: list[float], session: Session, k: int = 10
 ) -> list[dict]:
+    distance = Embedding.embedding.cosine_distance(embedding).label("distance")
     stmt = (
-        select(Embedding)
-        .options(joinedload(Embedding.track).selectinload(Track.artists))
-        .order_by(Embedding.embedding.cosine_distance(embedding))
+        select(Embedding, distance)
+        .options(
+            joinedload(Embedding.track).selectinload(Track.artists),
+            joinedload(Embedding.track).joinedload(Track.audio_features),
+        )
+        .order_by(distance)
         .limit(k)
     )
-    results = session.execute(stmt).unique().scalars().all()
+    results = session.execute(stmt).unique().all()
 
-    return [
-        {
-            "track": e.track.title,
-            "album": e.track.album_name,
-            "artists": [a.name for a in e.track.artists],
-            "release_date": str(e.track.release_date) if e.track.release_date else None,
-            "popularity": e.track.popularity,
-        }
-        for e in results
-    ]
-
-
-def clean_sql(raw: str) -> str:
-    sql = raw.replace("```sql", "").replace("```", "").strip()
-    if sql.endswith(";"):
-        sql = sql[:-1].strip()
-    return sql
+    rows = []
+    for embedding_row, distance_value in results:
+        track = embedding_row.track
+        features = track.audio_features
+        genres = sorted(
+            {genre for artist in track.artists for genre in (artist.genres or [])}
+        )
+        rows.append(
+            {
+                "track_uri": track.uri,
+                "track": track.title,
+                "album": track.album_name,
+                "artists": [artist.name for artist in track.artists],
+                "artist_genres": genres,
+                "release_date": str(track.release_date) if track.release_date else None,
+                "popularity": track.popularity,
+                "tempo": features.tempo if features else None,
+                "energy": features.energy if features else None,
+                "danceability": features.danceability if features else None,
+                "valence": features.valence if features else None,
+                "cosine_distance": float(distance_value),
+            }
+        )
+    return rows
 
 
 def embed_question(question: str, embed_model) -> list[float]:

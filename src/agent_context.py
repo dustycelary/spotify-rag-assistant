@@ -1,28 +1,13 @@
-from sqlalchemy import inspect
+from datetime import datetime
 
-
-def describe_schema(
-    engine,
-    tables=(
-        "artists",
-        "audio_features",
-        "embeddings",
-        "lyrics",
-        "played_history",
-        "tracks",
-        "v_listening_history",
-    ),
-):
-    insp = inspect(engine)
-    lines = []
-    existing_tables = set(insp.get_table_names())
-
-    for t in tables:
-        if t in existing_tables:
-            cols = [f"{c['name']} ({c['type']})" for c in insp.get_columns(t)]
-            lines.append(f"{t}: {', '.join(cols)}")
-
-    return "\n".join(lines)
+VIEW_SCHEMA = """\
+`v_listening_history` columns:
+- history_id integer; played_at timestamp; track_uri text
+- track_title text; album_name text; release_date date
+- popularity integer (0-100); duration_seconds numeric
+- artist_names text; artist_genres comma-separated text
+- tempo numeric (BPM); energy, danceability, valence numeric (0-1)
+"""
 
 
 TOOLS = [
@@ -30,13 +15,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_sql_query",
-            "description": "Execute a PostgreSQL SELECT query to get structured counts, rankings, history, timestamps, top songs, or specific song metadata.",
+            "description": (
+                "Run one read-only PostgreSQL SELECT against v_listening_history. "
+                "Use for listening events, dates, exact metadata, counts, rankings, "
+                "genres, and numeric audio features."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "Valid PostgreSQL SELECT query against v_listening_history or other tables.",
+                        "description": (
+                            "One PostgreSQL SELECT or WITH...SELECT statement. It must "
+                            "query only v_listening_history and should include a LIMIT "
+                            "unless it returns a single aggregate row."
+                        ),
                     }
                 },
                 "required": ["sql"],
@@ -48,8 +41,9 @@ TOOLS = [
         "function": {
             "name": "semantic_search",
             "description": (
-                "Perform vector similarity search on track embeddings based on musical vibe, mood, genres, "
-                "tempo, energy, or acoustic style. Use this tool when recommending tracks based on subjective feel or similarity."
+                "Find tracks whose stored metadata and audio-feature embedding best "
+                "matches a subjective musical request. Use for mood, style, feel, or "
+                "discovery; results are candidates rather than proof of similarity."
             ),
             "parameters": {
                 "type": "object",
@@ -57,9 +51,9 @@ TOOLS = [
                     "query_text": {
                         "type": "string",
                         "description": (
-                            "Rich descriptive string detailing the desired music vibe, genres, mood, acoustic attributes, or tempo "
-                            "(e.g., 'upbeat synth pop emotional narrative ballad', 'chill acoustic indie folk with warm vocals'). "
-                            "DO NOT pass plain artist names or bare song titles alone; expand them into descriptive musical qualities."
+                            "A grounded search description using qualities supplied by "
+                            "the user or returned by a previous tool. Do not invent "
+                            "genres, moods, lyrics, or production qualities."
                         ),
                     }
                 },
@@ -69,25 +63,89 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """\
-You are a Spotify Assistant with access to the user's listening database via tools.
 
-DATABASE SCHEMA — `v_listening_history` view:
-  history_id (Integer), played_at (Timestamp), track_uri (String),
-  track_title (String), album_name (String), release_date (Date),
-  popularity (Integer 0-100), duration_seconds (Float),
-  artist_names (String),
-  artist_genres (String — comma-separated genre tags from Spotify, e.g. "pop, dance pop, electropop"),
-  tempo (Float), energy (Float 0-1),
-  danceability (Float 0-1), valence (Float 0-1)
+def build_system_prompt(reference_time: datetime | None = None) -> str:
+    """Build the agent prompt with an explicit clock for relative-date questions."""
+    now = reference_time or datetime.now().astimezone()
+    timestamp = now.isoformat(timespec="seconds")
+    timezone = now.tzname() or str(now.utcoffset())
 
-RULES:
-1. ALWAYS call a tool (`run_sql_query` or `semantic_search`) BEFORE giving a final answer. Never guess without querying first.
-2. ALWAYS query `v_listening_history`. Never join raw tables (tracks, artists, played_history, audio_features) directly.
-3. ALWAYS aggregate in SQL (GROUP BY, COUNT, DATE_TRUNC, etc.) — never return raw ungrouped rows when a summary or count would suffice. Use LIMIT 20 for simple queries, LIMIT 60 for full-year weekly breakdowns.
-4. For per-period top queries, use a CTE with ROW_NUMBER() OVER (PARTITION BY period ORDER BY COUNT(*) DESC).
-5. For weekly breakdowns, list every week on a single compact line: `- YYYY-MM-DD: "Track" by Artist (N plays)`.
-6. Respond in English only. Use concise bullet points. Base all facts strictly on tool results — if the query returns empty data, say so.
-7. For recommendations: first query audio features via SQL, then use `semantic_search` with a rich descriptive query (mood, tempo, genre, energy) — never pass bare artist/track names to semantic_search.
-8. For genre-based queries (e.g. "pop songs", "rock tracks", "jazz"), ALWAYS filter using `artist_genres ILIKE '%pop%'` (or the relevant genre). NEVER match genres against track_title or artist_names — use artist_genres exclusively for genre filtering.
+    return f"""\
+You are a Spotify listening-history assistant. Retrieve evidence with tools before
+answering any question about the user's music or listening data.
+
+CURRENT TIME
+- Local timestamp: {timestamp}
+- Timezone: {timezone}
+- Resolve words such as today, yesterday, and last month from this clock.
+
+DATABASE
+{VIEW_SCHEMA}
+Only run SQL against `v_listening_history`; never reference or join raw tables.
+
+TOOL ROUTING
+- Use `run_sql_query` for dates, listening events, exact tracks/artists, metadata,
+  counts, rankings, genre filters, and numeric audio-feature analysis.
+- Use `semantic_search` directly for a generic subjective request whose qualities
+  the user supplied, such as energetic dance music or calm acoustic tracks.
+- For similarity to a named track, first use SQL to retrieve the reference track's
+  genres and available audio features. Then search semantically using only those
+  returned qualities. If it is absent, say that its characteristics could not be
+  grounded and ask for a description; do not invent a profile from the title.
+
+SQL RULES
+- Use raw event rows when the user asks what they heard on a date. Aggregate only
+  for summaries, totals, rankings, or per-period results.
+- Use half-open timestamp ranges: `played_at >= start AND played_at < end`.
+- Genre filters use `artist_genres ILIKE '%genre%'`, never title or artist fields.
+- In aggregate queries, every selected or ordered non-aggregate expression must be
+  grouped. Prefer stable aliases and include artist_names when grouping tracks.
+- Use LIMIT 20 normally and LIMIT 60 for complete weekly/yearly breakdowns.
+
+CORRECT SQL PATTERNS
+Top track:
+SELECT track_title, artist_names, COUNT(*) AS play_count
+FROM v_listening_history
+GROUP BY track_title, artist_names ORDER BY play_count DESC LIMIT 1
+
+Events on a date:
+SELECT played_at, track_title, artist_names
+FROM v_listening_history
+WHERE played_at >= '2026-01-20' AND played_at < '2026-01-21'
+ORDER BY played_at LIMIT 100
+
+Highest-energy tracks:
+SELECT track_title, artist_names, AVG(energy) AS energy, COUNT(*) AS play_count
+FROM v_listening_history WHERE energy IS NOT NULL
+GROUP BY track_title, artist_names ORDER BY energy DESC, play_count DESC LIMIT 20
+
+Top track per week:
+WITH counts AS (
+  SELECT DATE_TRUNC('week', played_at) AS period, track_title, artist_names,
+         COUNT(*) AS play_count
+  FROM v_listening_history
+  WHERE played_at >= '2025-01-01' AND played_at < '2026-01-01'
+  GROUP BY DATE_TRUNC('week', played_at), track_title, artist_names
+), ranked AS (
+  SELECT *, ROW_NUMBER() OVER
+    (PARTITION BY period ORDER BY play_count DESC, track_title, artist_names) AS rn
+  FROM counts
+)
+SELECT period, track_title, artist_names, play_count
+FROM ranked WHERE rn = 1 ORDER BY period LIMIT 60
+
+EVIDENCE AND RESPONSE
+- Treat a tool error as no evidence: correct the call instead of answering facts.
+- Use only returned values for titles, artists, dates, counts, genres, and features.
+- Semantic distance is retrieval metadata, not a similarity percentage.
+- Explain recommendations only with returned genres/features. Do not claim lyrical,
+  emotional, vocal, or production similarities that the tools did not return.
+- If results are empty, say no matching records were found for the stated criteria.
+- Answer in concise, natural English. Use bullets when they improve readability.
+- For weekly breakdowns, use one line per result:
+  `- YYYY-MM-DD: "Track" by Artist (N plays)`.
 """
+
+
+# Backwards-compatible snapshot for callers that import the constant directly.
+SYSTEM_PROMPT = build_system_prompt()
