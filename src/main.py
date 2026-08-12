@@ -1,11 +1,16 @@
+import argparse
 import logging
 import os
 import sys
 
 import dotenv
 import spotipy
-from sentence_transformers import SentenceTransformer
 from spotipy.oauth2 import SpotifyOAuth
+
+# Ensure project root is in sys.path when invoked via python -m src/main.py or direct script
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from src.agent_context import describe_schema
 from src.agent_tools import answer_question
@@ -62,16 +67,47 @@ def authenticate_user() -> spotipy.Spotify:
     )
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Spotify RAG Assistant")
+    parser.add_argument(
+        "-lc",
+        "--log-console",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable or disable logging to console (default: False). Logs are always written to app.log.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Shortcut to enable console logging.",
+    )
+    args, _ = parser.parse_known_args()
+    return args.log_console or args.verbose
+
+
 def main():
-    # Configure global logging settings
+    log_console = parse_args()
+
+    if not log_console:
+        os.environ["TQDM_DISABLE"] = "1"  # disables progress bars
+        # disables symlink symlink warnings from hugging Face
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+        # disables tokenizer deadlock warnings
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    handlers = [logging.FileHandler("app.log", mode="a")]
+    if log_console:
+        handlers.append(logging.StreamHandler(sys.stdout))
+
+    # Capture warnings (like HuggingFace hub warnings) into python logging
+    logging.captureWarnings(True)
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("app.log", mode="a"),
-        ],
+        handlers=handlers,
+        force=True,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
@@ -89,10 +125,14 @@ def main():
     #
     # sync_spotify_to_db(sp)
 
+    from sentence_transformers import SentenceTransformer
+
     model = SentenceTransformer(EMBEDDING_MODEL_NAME)
     ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
     logger.info(f"Using Ollama LLM model: {ollama_model}")
+
     print("Ready! Type 'exit' or 'quit' to stop.")
+
     while True:
         user_question = input(
             "What would you like to know about your spotify data?: "

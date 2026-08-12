@@ -21,9 +21,15 @@ def answer_question(
     question: str, session: Session, embed_model, schema_desc: str = ""
 ) -> str:
 
+    user_prompt = (
+        question
+        if "in english" in question.lower()
+        else f"{question}\n(Note: Provide your response strictly in English.)"
+    )
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
+        {"role": "user", "content": user_prompt},
     ]
     total_tool_calls = 0
 
@@ -41,6 +47,26 @@ def answer_question(
 
             if not tool_calls:
                 content = getattr(msg, "content", None)
+                if turn == 1 and total_tool_calls == 0:
+                    logger.warning(
+                        "Turn 1 provided no tool calls. Prompting model to execute a tool query first."
+                    )
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content or "",
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You must query `v_listening_history` using `run_sql_query` first "
+                                "before determining if records exist or giving a final answer. Please run a SQL query now."
+                            ),
+                        }
+                    )
+                    continue
 
                 logger.info(
                     "Agent completed reasoning at Turn %d/%d after %d tool call(s).",
@@ -123,11 +149,19 @@ def answer_question(
                     total_tool_calls,
                     len(data),
                 )
-                tool_msg_content = str(data)
+                tool_msg_content = json.dumps(data, default=str, indent=2)
 
                 if not data:
                     tool_msg_content += (
                         " (No matching records in database for this request.)"
+                    )
+                else:
+                    tool_msg_content += (
+                        "\n\n[SYSTEM REMINDER: Provide your response strictly in ENGLISH ONLY. "
+                        "If the dataset contains a full weekly breakdown (e.g. 52 weeks), "
+                        "list EVERY week in chronological order from January to December. "
+                        "Format each week as a single compact line: '- YYYY-MM-DD: \"Track Title\" by Artist Names (N plays)'. "
+                        "Do NOT split each week into multi-line blocks.]"
                     )
 
                 messages.append({"role": "tool", "content": tool_msg_content})
@@ -139,9 +173,10 @@ def answer_question(
         return f"Sorry, I couldn't process that query: {e}"
 
 
-def run_structured_query(sql: str, session: Session, max_rows: int = 20) -> list[dict]:
-    if not sql.strip().lower().startswith("select"):
-        raise ValueError("Only SELECT statements allowed")
+def run_structured_query(sql: str, session: Session, max_rows: int = 100) -> list[dict]:
+    clean_sql_str = sql.strip().lower()
+    if not (clean_sql_str.startswith("select") or clean_sql_str.startswith("with")):
+        raise ValueError("Only SELECT or WITH (CTE) SELECT statements allowed")
     result = session.execute(text(sql))
     return [dict(r) for r in result.mappings().fetchmany(max_rows)]
 
