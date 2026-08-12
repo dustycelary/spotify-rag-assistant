@@ -1,5 +1,15 @@
 {
   "venvPath": ".",
   "venv": ".venv",
-  "typeCheckingMode": "off"
+  "typeCheckingMode": "off",
+  "reportMissingImports": "none",
+  "reportUnusedImport": "warning",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist"
+  ]
 }
