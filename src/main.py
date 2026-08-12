@@ -12,7 +12,6 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.agent_context import describe_schema
 from src.agent_tools import answer_question
 from src.db import SessionLocal, engine, init_db
 
@@ -35,6 +34,21 @@ PI_SCOPES = (
     "user-top-read "
     "user-read-recently-played"
 )
+
+
+class EmbedModel:
+    """Loads embedding model on first use, not on startup."""
+
+    def __init__(self, model_name: str):
+        self._model_name = model_name
+        self._model = None
+
+    def encode(self, *args, **kwargs):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
+        return self._model.encode(*args, **kwargs)
 
 
 def authenticate_user() -> spotipy.Spotify:
@@ -115,19 +129,16 @@ def main():
 
     logger.info("Initializing database...")
     init_db(engine)
-    schema_layout = describe_schema(engine)
-
     logger.info("Starting ingest pipeline...")
-    # sp = authenticate_user()
-    # logger.info("Authentication successful.")
+    sp = authenticate_user()
+    logger.info("Authentication successful.")
 
-    # from src.helpers import sync_spotify_to_db
-    #
+    from src.helpers import sync_artist_genres
+
     # sync_spotify_to_db(sp)
+    sync_artist_genres(sp)  # backfills artists.genres from Spotify API
 
-    from sentence_transformers import SentenceTransformer
-
-    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    model = EmbedModel(EMBEDDING_MODEL_NAME)
     ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
     logger.info(f"Using Ollama LLM model: {ollama_model}")
 
@@ -143,7 +154,7 @@ def main():
             break
 
         with SessionLocal() as session:
-            ans = answer_question(user_question, session, model, schema_layout)
+            ans = answer_question(user_question, session, model)
             print(f"\n{ans}\n")
 
 

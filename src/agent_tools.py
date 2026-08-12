@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS"))
 
 
-def answer_question(
-    question: str, session: Session, embed_model, schema_desc: str = ""
-) -> str:
+OLLAMA_OPTIONS = {"temperature": 0.1, "num_predict": 2048, "num_ctx": 8192}
+
+
+def answer_question(question: str, session: Session, embed_model) -> str:
 
     user_prompt = (
         question
@@ -33,10 +34,16 @@ def answer_question(
     ]
     total_tool_calls = 0
 
+    logger.info("=" * 60)
+    logger.info("NEW QUERY: %s", question)
+    logger.info("=" * 60)
+
     try:
         for turn in range(1, MAX_TOOL_TURNS + 1):
             logger.info("Agent Turn %d/%d: Prompting model...", turn, MAX_TOOL_TURNS)
-            response = ollama.chat(model=MODEL_NAME, messages=messages, tools=TOOLS)
+            response = ollama.chat(
+                model=MODEL_NAME, messages=messages, tools=TOOLS, options=OLLAMA_OPTIONS
+            )
             # msg = response.get("message") if response else None
             msg = getattr(response, "message", None)
             if not msg:
@@ -149,19 +156,11 @@ def answer_question(
                     total_tool_calls,
                     len(data),
                 )
-                tool_msg_content = json.dumps(data, default=str, indent=2)
+                tool_msg_content = json.dumps(data, default=str, separators=(",", ":"))
 
                 if not data:
                     tool_msg_content += (
                         " (No matching records in database for this request.)"
-                    )
-                else:
-                    tool_msg_content += (
-                        "\n\n[SYSTEM REMINDER: Provide your response strictly in ENGLISH ONLY. "
-                        "If the dataset contains a full weekly breakdown (e.g. 52 weeks), "
-                        "list EVERY week in chronological order from January to December. "
-                        "Format each week as a single compact line: '- YYYY-MM-DD: \"Track Title\" by Artist Names (N plays)'. "
-                        "Do NOT split each week into multi-line blocks.]"
                     )
 
                 messages.append({"role": "tool", "content": tool_msg_content})
@@ -173,10 +172,15 @@ def answer_question(
         return f"Sorry, I couldn't process that query: {e}"
 
 
-def run_structured_query(sql: str, session: Session, max_rows: int = 100) -> list[dict]:
+def run_structured_query(
+    sql: str, session: Session, max_rows: int = 100, timeout_ms: int = 5000
+) -> list[dict]:
     clean_sql_str = sql.strip().lower()
     if not (clean_sql_str.startswith("select") or clean_sql_str.startswith("with")):
         raise ValueError("Only SELECT or WITH (CTE) SELECT statements allowed")
+
+    session.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}';"))
+    session.execute(text("SET LOCAL default_transaction_read_only = ON;"))
     result = session.execute(text(sql))
     return [dict(r) for r in result.mappings().fetchmany(max_rows)]
 

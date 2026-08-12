@@ -138,3 +138,129 @@ def sync_spotify_to_db(sp: Any) -> dict[str, int]:
         logger.error("Failed to write synced tracks to DB: %s", e)
 
     return {"tracks_added": tracks_added, "plays_inserted": plays_inserted}
+
+
+def sync_artist_genres(sp: Any) -> int:
+    """Fetches and updates genre + popularity data for artists missing genres.
+
+    Handles two URI formats:
+    - Standard Spotify URIs (spotify:artist:<id>): batch lookup via sp.artists()
+    - Data-export URIs (spotify:artist:local:<slug>): individual search by name
+
+    Returns:
+        int: Number of artists updated with genre data.
+    """
+    import logging
+    import time
+
+    from src.models.artist import Artist
+
+    logger = logging.getLogger(__name__)
+
+    if not sp:
+        return 0
+
+    logger.info("Syncing artist genres from Spotify API...")
+    updated_count = 0
+
+    try:
+        with SessionLocal() as session:
+            artists_missing_genres = (
+                session.query(Artist)
+                .filter(Artist.genres.is_(None))
+                .all()
+            )
+
+            if not artists_missing_genres:
+                logger.info("All artists already have genre data.")
+                return 0
+
+            # Split into batch-fetchable (real URIs) and search-by-name (local URIs)
+            batch_artists = []
+            search_artists = []
+            for artist in artists_missing_genres:
+                if ":local:" in artist.uri:
+                    search_artists.append(artist)
+                else:
+                    batch_artists.append(artist)
+
+            logger.info(
+                "Found %d artist(s) without genres (%d by ID, %d by name search).",
+                len(artists_missing_genres),
+                len(batch_artists),
+                len(search_artists),
+            )
+
+            # --- Batch fetch by Spotify ID ---
+            batch_size = 50
+            for i in range(0, len(batch_artists), batch_size):
+                batch = batch_artists[i : i + batch_size]
+                artist_ids = []
+                uri_to_artist = {}
+
+                for artist in batch:
+                    parts = artist.uri.split(":")
+                    if len(parts) == 3 and parts[1] == "artist":
+                        artist_ids.append(parts[2])
+                        uri_to_artist[artist.uri] = artist
+
+                if not artist_ids:
+                    continue
+
+                try:
+                    results = sp.artists(artist_ids)
+                    for artist_data in results.get("artists", []):
+                        if not artist_data:
+                            continue
+                        uri = artist_data.get("uri")
+                        genres = artist_data.get("genres", [])
+                        popularity = artist_data.get("popularity")
+
+                        if uri and uri in uri_to_artist:
+                            db_artist = uri_to_artist[uri]
+                            db_artist.genres = genres if genres else []
+                            if popularity is not None:
+                                db_artist.popularity = popularity
+                            updated_count += 1
+                except Exception as e:
+                    logger.error(
+                        "Failed to fetch artist batch at index %d: %s", i, e
+                    )
+                    continue
+
+            # --- Search by name for data-export artists ---
+            for idx, artist in enumerate(search_artists):
+                try:
+                    results = sp.search(q=artist.name, type="artist", limit=1)
+                    items = results.get("artists", {}).get("items", [])
+                    if items:
+                        top = items[0]
+                        artist.genres = top.get("genres", []) or []
+                        if top.get("popularity") is not None:
+                            artist.popularity = top["popularity"]
+                        updated_count += 1
+                    else:
+                        artist.genres = []  # no match found, mark as processed
+                except Exception as e:
+                    logger.error(
+                        "Failed to search artist '%s': %s", artist.name, e
+                    )
+                    artist.genres = []  # mark as processed to avoid retrying
+
+                # Respect Spotify rate limits — commit + brief pause every 50
+                if (idx + 1) % 50 == 0:
+                    session.commit()
+                    logger.info(
+                        "Searched %d/%d artists by name...",
+                        idx + 1,
+                        len(search_artists),
+                    )
+                    time.sleep(1)
+
+            session.commit()
+
+        logger.info("Genre sync complete: %d artist(s) updated.", updated_count)
+    except Exception as e:
+        logger.error("Failed to sync artist genres: %s", e)
+
+    return updated_count

@@ -55,6 +55,12 @@ def init_db(engine):
        t.popularity,
        ROUND(t.duration_ms / 1000.0, 1) AS duration_seconds,
        COALESCE(string_agg(DISTINCT a.name, ', '), 'Unknown Artist') AS artist_names,
+       (SELECT string_agg(DISTINCT g, ', ')
+        FROM track_artists ta_g
+        JOIN artists a_g ON ta_g.artist_uri = a_g.uri,
+        LATERAL unnest(a_g.genres) AS g
+        WHERE ta_g.track_uri = t.uri
+       ) AS artist_genres,
        af.tempo,
        af.energy,
        af.danceability,
