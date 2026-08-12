@@ -15,17 +15,22 @@ from src.models.embedding import Embedding
 from src.models.track import Track
 
 dotenv.load_dotenv()
-MODEL_NAME = os.environ.get("OLLAMA_MODEL", "llama3.2")
 logger = logging.getLogger(__name__)
-MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS", "6"))
 
-OLLAMA_OPTIONS = {"temperature": 0.1, "num_predict": 2048, "num_ctx": 8192}
+
+MODEL_NAME = os.environ.get("OLLAMA_MODEL", "llama3.2")
+OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+MAX_TOOL_TURNS = int(os.environ.get("MAX_TOOL_TURNS", "4"))
+
+OLLAMA_OPTIONS = {
+    "temperature": 0.1,
+    "num_ctx": int(os.environ.get("OLLAMA_NUM_CTX", "4096")),
+    "num_predict": int(os.environ.get("OLLAMA_NUM_PREDICT", "768")),
+}
+
 NO_TOOL_RECOVERY = (
-    "Before answering this Spotify-data request, call the appropriate tool. Use "
-    "`run_sql_query` for listening-history facts, dates, counts, rankings, metadata, "
-    "genres, or audio features. Use `semantic_search` for subjective discovery from "
-    "qualities the user supplied. For similarity to a named track, retrieve that "
-    "track with SQL first. Do not provide a factual final answer yet."
+    "Call a tool before answering: SQL for facts; semantic search for "
+    "user-supplied musical qualities. For named-track similarity, use SQL first."
 )
 
 FORBIDDEN_RELATIONS = {
@@ -69,6 +74,7 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                 messages=messages,
                 tools=TOOLS,
                 options=OLLAMA_OPTIONS,
+                keep_alive=OLLAMA_KEEP_ALIVE,
             )
             msg = _field(response, "message")
             if not msg:
@@ -85,7 +91,7 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                         "requesting a tool call.",
                         turn,
                     )
-                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "assistant", "content": ""})
                     messages.append({"role": "user", "content": NO_TOOL_RECOVERY})
                     continue
 
@@ -98,7 +104,11 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                 )
                 return content or "No response could be generated."
 
-            messages.append(msg)
+            # Keep the tool calls but discard prose the model generated alongside
+            # them; it adds tokens without helping the next turn.
+            messages.append(
+                {"role": "assistant", "content": "", "tool_calls": tool_calls}
+            )
             for tool_call in tool_calls:
                 total_tool_calls += 1
                 func_info = _field(tool_call, "function", {})
@@ -112,21 +122,11 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                     if not isinstance(func_args, dict):
                         raise ValueError
                 except (json.JSONDecodeError, ValueError, TypeError):
-                    payload = {
-                        "status": "error",
-                        "error": {
-                            "code": "invalid_arguments",
-                            "message": (
-                                "Tool arguments must be a JSON object. Correct the "
-                                "call and retry."
-                            ),
-                        },
-                    }
                     messages.append(
                         {
                             "role": "tool",
                             "tool_name": func_name,
-                            "content": json.dumps(payload, separators=(",", ":")),
+                            "content": '{"error":"Use valid JSON arguments."}',
                         }
                     )
                     continue
@@ -134,21 +134,11 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                 encoded_args = json.dumps(func_args, sort_keys=True, default=str)
                 signature = f"{func_name}:{encoded_args}"
                 if signature in seen_tool_calls:
-                    payload = {
-                        "status": "error",
-                        "error": {
-                            "code": "duplicate_call",
-                            "message": (
-                                "This exact tool call already ran. Use its earlier "
-                                "result or change the call."
-                            ),
-                        },
-                    }
                     messages.append(
                         {
                             "role": "tool",
                             "tool_name": func_name,
-                            "content": json.dumps(payload, separators=(",", ":")),
+                            "content": '{"error":"Duplicate call; use prior result."}',
                         }
                     )
                     continue
@@ -175,72 +165,46 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                         embedding = embed_question(query_text, embed_model)
                         rows = semantic_search(embedding, session)
                     else:
-                        payload = {
-                            "status": "error",
-                            "error": {
-                                "code": "unknown_tool",
-                                "message": (
-                                    f"Unknown tool `{func_name}`. Use one of the "
-                                    "provided tools."
-                                ),
-                            },
-                        }
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_name": func_name,
-                                "content": json.dumps(payload, separators=(",", ":")),
+                                "content": '{"error":"Unknown tool."}',
                             }
                         )
                         continue
                 except ValueError as exc:
                     logger.warning("Rejected tool call on Turn %d: %s", turn, exc)
-                    payload = {
-                        "status": "error",
-                        "error": {"code": "invalid_request", "message": str(exc)},
-                    }
                     messages.append(
                         {
                             "role": "tool",
                             "tool_name": func_name,
-                            "content": json.dumps(payload, separators=(",", ":")),
+                            "content": json.dumps(
+                                {"error": str(exc)}, separators=(",", ":")
+                            ),
                         }
                     )
                     continue
                 except Exception:
                     logger.exception("Tool execution failed on Turn %d", turn)
                     session.rollback()
-                    code = (
-                        "sql_execution_error"
-                        if func_name == "run_sql_query"
-                        else "semantic_search_error"
-                    )
                     message = (
-                        "The query failed. Rewrite it using only documented "
-                        "columns from v_listening_history."
+                        "Query failed; retry with documented view columns."
                         if func_name == "run_sql_query"
-                        else "Semantic search failed. Retry or explain that "
-                        "recommendations are unavailable."
+                        else "Search failed; retry or report it unavailable."
                     )
-                    payload = {
-                        "status": "error",
-                        "error": {"code": code, "message": message},
-                    }
                     messages.append(
                         {
                             "role": "tool",
                             "tool_name": func_name,
-                            "content": json.dumps(payload, separators=(",", ":")),
+                            "content": json.dumps(
+                                {"error": message}, separators=(",", ":")
+                            ),
                         }
                     )
                     continue
 
                 successful_tool_calls += 1
-                payload = {
-                    "status": "ok",
-                    "row_count": len(rows),
-                    "rows": rows,
-                }
                 logger.info(
                     "Agent Turn %d tool #%d returned %d row(s)",
                     turn,
@@ -251,9 +215,7 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                     {
                         "role": "tool",
                         "tool_name": func_name,
-                        "content": json.dumps(
-                            payload, default=str, separators=(",", ":")
-                        ),
+                        "content": json.dumps(rows, default=str, separators=(",", ":")),
                     }
                 )
 
@@ -310,7 +272,11 @@ def run_structured_query(
     connection = session.connection()
     connection.exec_driver_sql(f"SET LOCAL statement_timeout = '{int(timeout_ms)}ms'")
     connection.exec_driver_sql("SET LOCAL default_transaction_read_only = ON")
-    result = connection.exec_driver_sql(sql)
+    # psycopg2 uses percent-based parameter markers even when no parameters are
+    # supplied. Escape lone wildcard characters before sending raw driver SQL;
+    # validation and any caller logging intentionally retain the readable SQL.
+    driver_sql = re.sub(r"(?<!%)%(?!%)", "%%", sql)
+    result = connection.exec_driver_sql(driver_sql)
     return [dict(row) for row in result.mappings().fetchmany(max_rows)]
 
 
