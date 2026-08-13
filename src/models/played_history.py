@@ -12,9 +12,11 @@ from sqlalchemy.sql import func
 from src.db import Base
 
 
-class RecentlyPlayed(Base):
-    __tablename__ = "recently_played"
-    __table_args__ = (UniqueConstraint("track_uri", "played_at", name="unique_play"),)
+class PlayedHistory(Base):
+    __tablename__ = "played_history"
+    __table_args__ = (
+        UniqueConstraint("track_uri", "played_at", name="unique_history_play"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     track_uri = Column(String(255), ForeignKey("tracks.uri", ondelete="CASCADE"))
@@ -24,4 +26,4 @@ class RecentlyPlayed(Base):
     inserted_at = Column(DateTime, server_default=func.current_timestamp())
 
     # Relationships
-    track = relationship("Track", back_populates="recently_played")
+    track = relationship("Track", back_populates="played_history")

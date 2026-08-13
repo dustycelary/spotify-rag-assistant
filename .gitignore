@@ -3,6 +3,7 @@ test/
 .spotify_token_cache
 .DS_Store
 playground/
+run.sh
 
 
 # Byte-compiled / optimized / DLL files

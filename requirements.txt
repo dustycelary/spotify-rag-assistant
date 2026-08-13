@@ -1,21 +1,7 @@
-# Spotify Data Extraction
 spotipy
-# lyricsgenius
 python-dotenv
-
-# Data Analysis
-pandas
-# numpy
-
-# Vector Database & Embeddings
 sentence-transformers
 sqlalchemy
-psycopg[binary]
+psycopg2-binary
 pgvector
-
-# Local LLM Integration
 ollama
-
-# Web UI & Visualization
-# streamlit
-# plotly

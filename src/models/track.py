@@ -41,7 +41,6 @@ class Track(Base):
     release_date = Column(Date)
     popularity = Column(Integer)
     duration_ms = Column(Integer)
-    artist = Column(String(255))
     updated_at = Column(DateTime, server_default=func.current_timestamp())
 
     # Relationships
@@ -52,11 +51,9 @@ class Track(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    lyrics = relationship(
-        "Lyrics", back_populates="track", uselist=False, cascade="all, delete-orphan"
-    )
-    recently_played = relationship(
-        "RecentlyPlayed", back_populates="track", cascade="all, delete-orphan"
+
+    played_history = relationship(
+        "PlayedHistory", back_populates="track", cascade="all, delete-orphan"
     )
     embedding = relationship(
         "Embedding", back_populates="track", uselist=False, cascade="all, delete-orphan"
