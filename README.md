@@ -1,5 +1,7 @@
 # Spotify RAG Assistant
 
+[![CI](https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml/badge.svg)](<https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml>)
+
 An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analyzing your personal Spotify listening history, audio features, lyrics, and song embeddings.
 
 ## Prerequisites
@@ -25,20 +27,19 @@ An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analy
 git clone git@github.com:dustycelary/spotify-rag-assistant.git && cd spotify-rag-assistant
 ```
 
-
-2. Setup Python environment
+1. Setup Python environment
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
 ```
 
-3. Install dependencies
+1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Download LLM model
+1. Download LLM model
 
 ```bash
 ollama pull qwen2.5:14b
@@ -52,7 +53,7 @@ ollama pull qwen2.5:14b
 cp .env.example .env
 ```
 
-2. set `OLLAMA_MODEL` to your installed model. 
+1. set `OLLAMA_MODEL` to your installed model.
 
 ### Spotify Developer
 
@@ -139,4 +140,28 @@ PostgreSQL logs are managed separately by Docker. To follow them:
 
 ```bash
 docker compose logs -f db
+```
+
+## Development
+
+Continous integration (CI) runs on every branch push and pull requests targetting **main**.
+
+To install development tools:
+
+```bash
+pip install ruff==0.15.12
+```
+
+To run checks:
+
+```bash
+ruff check . 
+ruff format --check .
+```
+
+To automatically fix lint issues and format code:
+
+```bash
+ruff check --fix .
+ruff format .
 ```
