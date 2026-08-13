@@ -34,7 +34,7 @@ services:
       - OLLAMA_HOST=http://host.docker.internal:11434
 
     volumes:
-      - ../logs:/app/logs
+      - ./logs:/app/logs
       - ../test_data:/app/test_data
       - ./.spotify_token_cache:/app/.spotify_token_cache
       - ./src:/app/src

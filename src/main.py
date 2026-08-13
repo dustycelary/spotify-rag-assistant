@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 import dotenv
 import spotipy
@@ -84,20 +85,12 @@ def authenticate_user() -> spotipy.Spotify:
 def parse_args():
     parser = argparse.ArgumentParser(description="Spotify RAG Assistant")
     parser.add_argument(
-        "-lc",
         "--log-console",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable or disable logging to console (default: False). Logs are always written to app.log.",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
         action="store_true",
-        help="Shortcut to enable console logging.",
+        help="Also write logs to the console. Logs are always written to logs/app.log.",
     )
-    args, _ = parser.parse_known_args()
-    return args.log_console or args.verbose
+    args = parser.parse_args()
+    return args.log_console
 
 
 def main():
@@ -110,7 +103,9 @@ def main():
         # disables tokenizer deadlock warnings
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    handlers = [logging.FileHandler("app.log", mode="a")]
+    log_path = Path("logs/app.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handlers = [logging.FileHandler(log_path, mode="a")]
     if log_console:
         handlers.append(logging.StreamHandler(sys.stdout))
 
@@ -130,7 +125,7 @@ def main():
     logger.info("Initializing database...")
     init_db(engine)
     logger.info("Starting ingest pipeline...")
-    sp = authenticate_user()
+    # sp = authenticate_user()
     logger.info("Authentication successful.")
 
     model = EmbedModel(EMBEDDING_MODEL_NAME)
