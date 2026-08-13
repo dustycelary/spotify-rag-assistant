@@ -133,11 +133,6 @@ def main():
     sp = authenticate_user()
     logger.info("Authentication successful.")
 
-    from src.helpers import sync_artist_genres
-
-    # sync_spotify_to_db(sp)
-    sync_artist_genres(sp)  # backfills artists.genres from Spotify API
-
     model = EmbedModel(EMBEDDING_MODEL_NAME)
     ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
     logger.info(f"Using Ollama LLM model: {ollama_model}")
