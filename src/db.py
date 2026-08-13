@@ -70,7 +70,10 @@ def init_db(engine):
    LEFT JOIN track_artists ta ON t.uri = ta.track_uri
    LEFT JOIN artists a ON ta.artist_uri = a.uri
    LEFT JOIN audio_features af ON t.uri = af.track_uri
-   GROUP BY ph.id, ph.played_at, t.uri, t.title, t.album_name, t.release_date, t.popularity, t.duration_ms, af.tempo, af.energy, af.danceability, af.valence;
+   GROUP BY
+       ph.id, ph.played_at, t.uri, t.title, t.album_name, t.release_date,
+       t.popularity, t.duration_ms, af.tempo, af.energy, af.danceability,
+       af.valence;
 """
 
         with engine.begin() as conn:

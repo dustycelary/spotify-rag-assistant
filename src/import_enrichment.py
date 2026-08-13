@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 from collections.abc import Sequence
@@ -51,11 +52,8 @@ def get_spotify_client(logger: logging.Logger) -> spotipy.Spotify | None:
         return None
 
 
-import hashlib
-
-
 def _generate_fallback_features(track_uri: str) -> dict:
-    """Generates realistic, deterministic audio features for a track URI when API is restricted."""
+    """Generate deterministic audio features when the Spotify API is restricted."""
     h = int(hashlib.md5(track_uri.encode("utf-8")).hexdigest(), 16)
     energy = round(0.40 + (h % 55) / 100.0, 2)
     valence = round(0.30 + ((h >> 4) % 60) / 100.0, 2)
@@ -75,18 +73,24 @@ def _generate_fallback_features(track_uri: str) -> dict:
     }
 
 
-def enrich_audio_features(logger: logging.Logger, batch_size: int = 100) -> dict[str, int]:
+def enrich_audio_features(
+    logger: logging.Logger, batch_size: int = 100
+) -> dict[str, int]:
     with SessionLocal() as session:
-        missing_feature_uris = session.execute(
-            text(
-                """
+        missing_feature_uris = (
+            session.execute(
+                text(
+                    """
                 SELECT t.uri
                 FROM tracks t
                 LEFT JOIN audio_features af ON af.track_uri = t.uri
                 WHERE af.track_uri IS NULL
                 """
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     if not missing_feature_uris:
         return {"feature_candidates": 0, "features_upserted": 0}
@@ -190,14 +194,18 @@ def enrich_embeddings(
     batch_size: int = 256,
 ) -> dict[str, int]:
     with SessionLocal() as session:
-        rows = session.execute(
-            text(
-                """
+        rows = (
+            session.execute(
+                text(
+                    """
                 SELECT
                     t.uri AS track_uri,
                     t.title,
                     t.album_name,
-                    COALESCE(string_agg(DISTINCT a.name, ', '), 'Unknown Artist') AS artist_names,
+                    COALESCE(
+                        string_agg(DISTINCT a.name, ', '),
+                        'Unknown Artist'
+                    ) AS artist_names,
                     af.tempo,
                     af.energy,
                     af.danceability,
@@ -209,10 +217,14 @@ def enrich_embeddings(
                 LEFT JOIN embeddings e ON e.track_uri = t.uri
                 WHERE e.track_uri IS NULL
                 GROUP BY
-                    t.uri, t.title, t.album_name, af.tempo, af.energy, af.danceability, af.valence
+                    t.uri, t.title, t.album_name, af.tempo, af.energy,
+                    af.danceability, af.valence
                 """
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
     if not rows:
         return {"embedding_candidates": 0, "embeddings_upserted": 0}

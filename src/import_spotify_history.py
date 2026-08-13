@@ -3,7 +3,8 @@
 Spotify Streaming History Importer
 ===================================
 Imports Spotify listening history (from Spotify Extended Privacy Data download:
-endsong_*.json, Audio_*.json, or StreamingHistory*.json) into PostgreSQL database tables.
+endsong_*.json, Audio_*.json, or StreamingHistory*.json) into PostgreSQL
+database tables.
 Also enriches `audio_features` and `embeddings` post-import.
 
 Usage:
@@ -46,9 +47,9 @@ except socket.gaierror:
 
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from src.import_enrichment import run_post_import_enrichment
 
 from src.db import SessionLocal, engine, init_db
+from src.import_enrichment import run_post_import_enrichment
 from src.models.artist import Artist
 from src.models.played_history import PlayedHistory
 from src.models.track import Track, track_artists
@@ -269,7 +270,10 @@ def bulk_insert_records(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Import Spotify Extended Streaming History JSON files into PostgreSQL database."
+        description=(
+            "Import Spotify Extended Streaming History JSON files into "
+            "PostgreSQL database."
+        )
     )
     parser.add_argument(
         "--path",
@@ -309,11 +313,13 @@ def main():
         print(" 1. Download your 'Extended Streaming History' from Spotify:")
         print("    https://www.spotify.com/account/privacy/")
         print(
-            " 2. Place your JSON files (endsong_*.json / Audio_*.json) in 'playground/spotify_data/'"
+            " 2. Place your JSON files (endsong_*.json / Audio_*.json) in "
+            "'playground/spotify_data/'"
         )
         print(" 3. Run this script:")
         print(
-            "    python playground/import_spotify_history.py --path playground/spotify_data/"
+            "    python playground/import_spotify_history.py "
+            "--path playground/spotify_data/"
         )
         print("    python playground/import_spotify_history.py --reset")
         print("=======================================================\n")

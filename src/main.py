@@ -8,7 +8,7 @@ import dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-# Ensure project root is in sys.path when invoked via python -m src/main.py or direct script
+# Ensure the project root is in sys.path when invoked as a module or direct script.
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
