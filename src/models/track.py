@@ -51,9 +51,7 @@ class Track(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    lyrics = relationship(
-        "Lyrics", back_populates="track", uselist=False, cascade="all, delete-orphan"
-    )
+
     played_history = relationship(
         "PlayedHistory", back_populates="track", cascade="all, delete-orphan"
     )

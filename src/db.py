@@ -29,7 +29,6 @@ Base = declarative_base()
 import src.models.artist  # noqa: F401
 import src.models.audio_features  # noqa: F401
 import src.models.embedding  # noqa: F401
-import src.models.lyrics  # noqa: F401
 import src.models.played_history  # noqa: F401
 import src.models.track  # noqa: F401
 

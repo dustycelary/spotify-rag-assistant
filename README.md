@@ -1,8 +1,8 @@
 # Spotify RAG Assistant
 
-[![CI](https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml/badge.svg)](<https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml>)
+[![CI](https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/dustycelary/spotify-rag-assistant/actions/workflows/ci.yml)
 
-An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analyzing your personal Spotify listening history, audio features, lyrics, and song embeddings.
+An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analyzing your personal Spotify listening history, audio features, and song embeddings.
 
 ## Prerequisites
 
@@ -17,7 +17,6 @@ An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analy
 ### API keys
 
 - A [Spotify Developer Account](https://developer.spotify.com/)
-- A [Genius Account](https://genius.com/) *(or API portal link)*
 
 ## Installation
 
@@ -61,12 +60,6 @@ cp .env.example .env
 2. Create an app
 3. Fill in details and set Redirect URI to redirect_uri value in [env](./.env)
 4. Copy your Client ID and secret into [env](./.env) under `client_id` and `client_secret`
-
-### Genius setup
-
-1. Sign up to Genius lyrics API: [Genius](https://genius.com/api-clients)
-2. Create an API client and set app website URL to `http://localhost`
-3. Generate access token and copy it into [env](./.env) as GENIUS_ACCESS_TOKEN
 
 ## Importing Spotify history
 
@@ -144,7 +137,7 @@ docker compose logs -f db
 
 ## Development
 
-Continous integration (CI) runs on every branch push and pull requests targetting **main**.
+Continuous integration (CI) runs on every branch push and pull requests targeting **main**.
 
 To install development tools:
 

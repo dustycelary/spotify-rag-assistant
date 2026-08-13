@@ -9,13 +9,13 @@ Also enriches `audio_features` and `embeddings` post-import.
 
 Usage:
     # Append new history to existing database
-    python playground/import_spotify_history.py
+    python src/import_spotify_history.py
 
     # Specify custom path to JSON files/folder
-    python playground/import_spotify_history.py --path /path/to/json_folder
+    python src/import_spotify_history.py --path /path/to/json_folder
 
     # Reset database (truncate all tables) before importing
-    python playground/import_spotify_history.py --reset
+    python src/import_spotify_history.py --reset
 """
 
 import argparse
@@ -314,14 +314,11 @@ def main():
         print("    https://www.spotify.com/account/privacy/")
         print(
             " 2. Place your JSON files (endsong_*.json / Audio_*.json) in "
-            "'playground/spotify_data/'"
+            "'src/spotify_data/'"
         )
         print(" 3. Run this script:")
-        print(
-            "    python playground/import_spotify_history.py "
-            "--path playground/spotify_data/"
-        )
-        print("    python playground/import_spotify_history.py --reset")
+        print("    python src/import_spotify_history.py --path src/spotify_data/")
+        print("    python src/import_spotify_history.py --reset")
         print("=======================================================\n")
         return
 

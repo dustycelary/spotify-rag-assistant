@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 from collections.abc import Sequence
@@ -32,8 +31,8 @@ def _to_track_id(track_uri: str) -> str | None:
 
 
 def get_spotify_client(logger: logging.Logger) -> spotipy.Spotify | None:
-    client_id = os.environ.get("client_id")
-    client_secret = os.environ.get("client_secret")
+    client_id = os.environ.get("CLIENT_ID")
+    client_secret = os.environ.get("CLIENT_SECRET")
     if not client_id or not client_secret:
         logger.warning(
             "Spotify client credentials missing; skipping audio feature enrichment."
@@ -50,27 +49,6 @@ def get_spotify_client(logger: logging.Logger) -> spotipy.Spotify | None:
     except Exception as e:
         logger.warning("Failed to initialize Spotify API client: %s", e)
         return None
-
-
-def _generate_fallback_features(track_uri: str) -> dict:
-    """Generate deterministic audio features when the Spotify API is restricted."""
-    h = int(hashlib.md5(track_uri.encode("utf-8")).hexdigest(), 16)
-    energy = round(0.40 + (h % 55) / 100.0, 2)
-    valence = round(0.30 + ((h >> 4) % 60) / 100.0, 2)
-    danceability = round(0.45 + ((h >> 8) % 45) / 100.0, 2)
-    tempo = round(80.0 + ((h >> 12) % 1000) / 10.0, 1)
-    return {
-        "track_uri": track_uri,
-        "valence": valence,
-        "energy": energy,
-        "danceability": danceability,
-        "tempo": tempo,
-        "acousticness": round(0.10 + ((h >> 16) % 40) / 100.0, 2),
-        "instrumentalness": round(((h >> 20) % 20) / 100.0, 2),
-        "liveness": round(0.10 + ((h >> 24) % 25) / 100.0, 2),
-        "loudness": round(-12.0 + ((h >> 28) % 80) / 10.0, 1),
-        "speechiness": round(0.03 + ((h >> 32) % 15) / 100.0, 2),
-    }
 
 
 def enrich_audio_features(
@@ -138,10 +116,6 @@ def enrich_audio_features(
                             "speechiness": feat.get("speechiness"),
                         }
                     )
-                else:
-                    # Fallback to deterministic calculated feature profile
-                    rows.append(_generate_fallback_features(uri))
-
             if not rows:
                 continue
 
