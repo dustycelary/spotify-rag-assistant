@@ -6,7 +6,7 @@ from src.import_spotify_history import parse_timestamp
 
 
 @pytest.mark.parametrize(
-    ("input", "expected"),
+    ("raw_input", "expected"),
     [
         (
             "2025-01-02T10:30:00Z",
@@ -23,8 +23,8 @@ from src.import_spotify_history import parse_timestamp
     ],
     ids=["iso-z", "iso-offset", "legacy-format"],
 )
-def test_parse_timestamp_valid(input: str, expected: datetime) -> None:
-    result = parse_timestamp(input)
+def test_parse_timestamp_valid(raw_input: str, expected: datetime) -> None:
+    result = parse_timestamp(raw_input)
     assert result == expected
     assert result.tzinfo is not None
 

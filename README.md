@@ -142,7 +142,7 @@ Continuous integration (CI) runs on every branch push and pull requests targetin
 To install development tools:
 
 ```bash
-pip install ruff==0.15.12
+pip install -r requirements-dev.txt
 ```
 
 To run checks:
