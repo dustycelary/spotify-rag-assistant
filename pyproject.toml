@@ -1,5 +1,5 @@
 [tool.ruff]
-line-length=88
+line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4"]
@@ -10,4 +10,15 @@ ignore = []
 "src/import_spotify_history.py" = ["E402"]
 "src/main.py" = ["E402"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+precision = 1
