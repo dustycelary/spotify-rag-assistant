@@ -22,35 +22,35 @@ An agentic Retrieval-Augmented Generation (RAG) assistant for querying and analy
 
 1. Clone the repo
 
-```bash
-git clone git@github.com:dustycelary/spotify-rag-assistant.git && cd spotify-rag-assistant
-```
+    ```bash
+    git clone git@github.com:dustycelary/spotify-rag-assistant.git && cd spotify-rag-assistant
+    ```
 
 1. Setup Python environment
 
-```bash
-python3 -m venv venv && source venv/bin/activate
-```
+    ```bash
+    python3 -m venv venv && source venv/bin/activate
+    ```
 
 1. Install dependencies
 
-```bash
-pip install -r requirements.txt
-```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 1. Download LLM model
 
-```bash
-ollama pull qwen2.5:14b
-```
+    ```bash
+    ollama pull qwen2.5:14b
+    ```
 
 ## Configuration
 
 1. Copy template environment
 
-```bash
-cp .env.example .env
-```
+    ```bash
+    cp .env.example .env
+    ```
 
 1. set `OLLAMA_MODEL` to your installed model.
 
@@ -97,21 +97,21 @@ python src/import_spotify_history.py --path "/path/to/extended history"
 
 1. Start the database container
 
-```bash
-docker compose up -d --remove-orphans db
-```
+    ```bash
+    docker compose up -d --remove-orphans db
+    ```
 
 1. Start Ollama
 
-```bash
-brew services run ollama
-```
+    ```bash
+    brew services run ollama
+    ```
 
 1. Run the app
 
-```bash
-python3 -m src.main
-```
+    ```bash
+    python3 -m src.main
+    ```
 
 ## Logging
 
@@ -145,7 +145,21 @@ To install development tools:
 pip install -r requirements-dev.txt
 ```
 
-To run checks:
+### Tests
+
+To run all tests:
+
+```bash
+python -m pytest
+```
+
+To see branch and line coverage:
+
+```bash
+python -m pytest --cov=src --cov-branch --cov-report=term-missing
+```
+
+To run quality checks:
 
 ```bash
 ruff check . 
