@@ -1,42 +1,22 @@
 #!/usr/bin/env python3
-"""
-Spotify Streaming History Importer
-===================================
-Imports Spotify listening history (from Spotify Extended Privacy Data download:
-endsong_*.json, Audio_*.json, or StreamingHistory*.json) into PostgreSQL
-database tables.
-Also enriches `audio_features` and `embeddings` post-import.
-
-Usage:
-    # Append new history to existing database
-    python src/import_spotify_history.py
-
-    # Specify custom path to JSON files/folder
-    python src/import_spotify_history.py --path /path/to/json_folder
-
-    # Reset database (truncate all tables) before importing
-    python src/import_spotify_history.py --reset
-"""
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import re
 import socket
-import sys
 import time
+import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Setup project path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import dotenv
 
-dotenv.load_dotenv(PROJECT_ROOT / ".env")
+dotenv.load_dotenv()
 
 # Fallback DB_HOST to localhost if running outside Docker
 db_host = os.environ.get("DB_HOST", "localhost")
@@ -61,42 +41,126 @@ logging.basicConfig(
 logger = logging.getLogger("import_spotify_history")
 
 
+class NormalizedPlay:
+    track_uri: str
+    title: str
+    artist_name: str | None
+    album_name: str | None
+    played_at: datetime
+    playback_ms: int
+
+
+@dataclass
+class HistoryParseResult:
+    total_records_read: int
+    tracks_by_uri: dict[str, dict]
+    artists_by_uri: dict[str, dict]
+    track_artist_pairs: set[tuple[str, str]]
+    plays: list[dict]
+
+
+def normalise_history_record(item: Mapping[str, object]) -> NormalizedPlay:
+    """Normalises Spotify history record into a normalized play object."""
+
+    track_uri = item.get("spotify_track_uri")
+    track_name = item.get("master_metadata_track_name")
+    artist_name = item.get("master_metadata_album_artist_name")
+    album_name = item.get("master_metadata_album_album_name")
+
+    if not track_uri:
+        return None
+
+    ts_val = item.get("ts")
+    ms_played = item.get("ms_played")
+    played_at = parse_timestamp(ts_val)
+    if not played_at or not ms_played:
+        return None
+    time_played = int(ms_played)
+
+    return NormalizedPlay(
+        track_uri=track_uri,
+        title=track_name or "Unknown Title",
+        artist_name=artist_name,
+        album_name=album_name,
+        played_at=played_at,
+        playback_ms=time_played,
+    )
+
+
 def clean_slug(text: str) -> str:
     """Generates a clean string slug for fallback URIs."""
     return re.sub(r"[^a-z0-9]", "_", text.lower()).strip("_")
 
 
-def parse_timestamp(ts_val: str) -> datetime | None:
-    """Parses various Spotify timestamp formats into UTC datetime object."""
-    if not ts_val:
+def generate_local_uri(entity_type: str, *components: str) -> str:
+    """Generates a canonical versioned local URI.
+
+    Steps:
+    1. Apply Unicode NFKC normalization to identity components.
+    2. Strip whitespace and case-fold for canonical identity.
+    3. Build a readable Unicode-safe slug.
+    4. Use `track` or `artist` if the readable part becomes empty.
+    5. Append 12 hexadecimal characters from SHA-256 of the full canonical identity.
+    6. Use versioned prefixes: spotify:<entity_type>:local:v1:<slug>:<hash_12>
+    """
+    canonical_parts = [
+        unicodedata.normalize("NFKC", c).strip().casefold()
+        for c in components
+        if c is not None
+    ]
+    canonical_identity = "::".join(canonical_parts)
+
+    slug = re.sub(r"[^\w]+", "-", canonical_identity, flags=re.UNICODE).strip("-")
+
+    if not slug:
+        slug = entity_type
+
+    identity_hash = hashlib.sha256(canonical_identity.encode("utf-8")).hexdigest()[:12]
+
+    return f"spotify:{entity_type}:local:v1:{slug}:{identity_hash}"
+
+
+def parse_timestamp(value: object) -> datetime | None:
+    """Parses various timestamp formats into UTC datetime object.
+
+    - Convert Z, positive offsets, and negative offsets to
+      timezone.utc using .astimezone(timezone.utc).
+    - Interpret YYYY-MM-DD HH:MM as UTC.
+    - Return None for blank, non-string, malformed, or impossible values.
+    """
+    if not isinstance(value, str) or not value:
         return None
+
+    val = value.strip()
+
     try:
-        if "T" in ts_val:
-            return datetime.fromisoformat(ts_val.replace("Z", "+00:00"))
-        return datetime.strptime(ts_val, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
-    except Exception as e:
-        logger.debug("Failed to parse timestamp '%s': %s", ts_val, e)
+        dt = datetime.fromisoformat(val)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError, OverflowError) as e:
+        logger.debug("Failed to parse timestamp %r: %s", value, e)
         return None
 
 
-def truncate_all_tables():
-    """Truncates all database tables in public schema with CASCADE."""
-    logger.info("Truncating all existing database tables...")
-    with engine.begin() as conn:
-        res = conn.execute(
-            text(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
-            )
+def truncate_all_tables(bind=engine):
+    """Truncates all application database tables with CASCADE."""
+    logger.info("Truncating application database tables...")
+    with bind.begin() as conn:
+        conn.execute(
+            text("""
+                TRUNCATE TABLE
+            played_history,
+            embeddings,
+            audio_features,
+            track_artists,
+            artists,
+            tracks
+                RESTART IDENTITY CASCADE;
+            """)
         )
-        tables = [r[0] for r in res if r[0] != "spatial_ref_sys"]
-        if tables:
-            tables_str = ", ".join([f'"{t}"' for t in tables])
-            conn.execute(text(f"TRUNCATE TABLE {tables_str} RESTART IDENTITY CASCADE;"))
-            logger.info("Successfully truncated tables: %s", ", ".join(tables))
-
     logger.info("Re-initializing database schema & views...")
-    init_db(engine)
+    init_db(bind)
 
 
 def discover_json_files(target_path: Path) -> list[Path]:
@@ -109,13 +173,15 @@ def discover_json_files(target_path: Path) -> list[Path]:
     return []
 
 
-def parse_spotify_history_files(json_files: list[Path]):
+def parse_spotify_history_files(json_files: list[Path]) -> HistoryParseResult:
     """Parses Spotify history JSON files and extracts structured records."""
-    tracks_dict = {}
-    artists_dict = {}
-    track_artists_set = set()
-    plays_list = []
-    total_records_read = 0
+    result = HistoryParseResult(
+        total_records_read=0,
+        tracks_by_uri={},
+        artists_by_uri={},
+        track_artist_pairs=set(),
+        plays=[],
+    )
 
     for filepath in json_files:
         logger.info("Parsing history file: %s", filepath.name)
@@ -127,143 +193,106 @@ def parse_spotify_history_files(json_files: list[Path]):
             continue
 
         if not isinstance(data, list):
-            logger.warning(
-                "File %s does not contain a list of records. Skipping.", filepath.name
-            )
             continue
 
         for item in data:
-            total_records_read += 1
-
-            track_uri = (
-                item.get("spotify_track_uri")
-                or item.get("track_uri")
-                or item.get("uri")
-            )
-            track_name = (
-                item.get("master_metadata_track_name")
-                or item.get("trackName")
-                or item.get("title")
-            )
-            artist_name = (
-                item.get("master_metadata_album_artist_name")
-                or item.get("artistName")
-                or item.get("artist")
-            )
-            album_name = (
-                item.get("master_metadata_album_album_name")
-                or item.get("albumName")
-                or item.get("album")
-            )
-            ts_val = item.get("ts") or item.get("endTime") or item.get("played_at")
-            ms_played = item.get("ms_played") or 0
-
-            # Create fallback local URI for older history without explicit URI
-            if not track_uri and (track_name and artist_name):
-                safe_name = clean_slug(f"{artist_name}_{track_name}")
-                track_uri = f"spotify:track:local:{safe_name}"
-
-            if not track_uri or not ts_val:
-                continue
-
-            played_at = parse_timestamp(ts_val)
-            if not played_at:
-                continue
+            result.total_records_read += 1
+            norm = normalise_history_record(item)
 
             # Track entry
-            if track_uri not in tracks_dict:
-                tracks_dict[track_uri] = {
-                    "uri": track_uri,
-                    "title": track_name or "Unknown Title",
-                    "album_name": album_name,
-                    "duration_ms": ms_played,
+            if norm.track_uri not in result.tracks_by_uri:
+                result.tracks_by_uri[norm.track_uri] = {
+                    "uri": norm.track_uri,
+                    "title": norm.track_name or "Unknown Title",
+                    "album_name": norm.album_name,
+                    "duration_ms": None,
                 }
-            elif ms_played > (tracks_dict[track_uri]["duration_ms"] or 0):
-                tracks_dict[track_uri]["duration_ms"] = ms_played
 
             # Artist & Track-Artist relationship
-            if artist_name:
-                artist_uri = f"spotify:artist:local:{clean_slug(artist_name)}"
-                if artist_uri not in artists_dict:
-                    artists_dict[artist_uri] = {
+            if norm.artist_name:
+                artist_uri = f"spotify:artist:local:{clean_slug(norm.artist_name)}"
+                if artist_uri not in result.artists_by_uri:
+                    result.artists_by_uri[artist_uri] = {
                         "uri": artist_uri,
-                        "name": artist_name,
+                        "name": norm.artist_name,
                     }
-                track_artists_set.add((track_uri, artist_uri))
+                result.track_artist_pairs.add((norm.track_uri, artist_uri))
 
             # Played History entry
-            plays_list.append(
+            result.plays.append(
                 {
-                    "track_uri": track_uri,
-                    "played_at": played_at,
-                    "context_type": item.get("inc_context_type")
-                    or item.get("context_type"),
-                    "context_uri": item.get("inc_context_uri")
-                    or item.get("context_uri"),
+                    "track_uri": norm.track_uri,
+                    "played_at": norm.played_at,
                 }
             )
 
-    return total_records_read, tracks_dict, artists_dict, track_artists_set, plays_list
+    return result
 
 
 def bulk_insert_records(
-    tracks_dict, artists_dict, track_artists_set, plays_list, chunk_size=5000
+    parsed: HistoryParseResult, session_factory=SessionLocal, chunk_size=5000
 ):
     """Inserts records in chunks using PostgreSQL bulk upsert."""
     t0 = time.time()
-    with SessionLocal() as session:
+    with session_factory() as session:
         # 1. Tracks
-        logger.info("Inserting %d unique tracks...", len(tracks_dict))
-        track_values = list(tracks_dict.values())
-        for i in range(0, len(track_values), chunk_size):
-            chunk = track_values[i : i + chunk_size]
-            stmt = (
-                pg_insert(Track)
-                .values(chunk)
-                .on_conflict_do_nothing(index_elements=["uri"])
-            )
-            session.execute(stmt)
+        track_values = list(parsed.tracks_by_uri.values())
+        if track_values:  # prevents empty list
+            logger.info("Inserting %d unique tracks...", len(track_values))
+            for i in range(0, len(track_values), chunk_size):
+                chunk = track_values[i : i + chunk_size]
+                stmt = (
+                    pg_insert(Track)
+                    .values(chunk)
+                    .on_conflict_do_nothing(index_elements=["uri"])
+                )
+                session.execute(stmt)
 
         # 2. Artists
-        logger.info("Inserting %d unique artists...", len(artists_dict))
-        artist_values = list(artists_dict.values())
-        for i in range(0, len(artist_values), chunk_size):
-            chunk = artist_values[i : i + chunk_size]
-            stmt = (
-                pg_insert(Artist)
-                .values(chunk)
-                .on_conflict_do_nothing(index_elements=["uri"])
-            )
-            session.execute(stmt)
+        artist_values = list(parsed.artists_by_uri.values())
+        logger.info("Inserting %d unique artists...", len(artist_values))
+        if artist_values:  # prevents empty list:
+            for i in range(0, len(artist_values), chunk_size):
+                chunk = artist_values[i : i + chunk_size]
+                stmt = (
+                    pg_insert(Artist)
+                    .values(chunk)
+                    .on_conflict_do_nothing(index_elements=["uri"])
+                )
+                session.execute(stmt)
 
-        # 3. Track-Artists
-        logger.info(
-            "Inserting %d track-artist relationships...", len(track_artists_set)
-        )
-        ta_values = [
-            {"track_uri": tu, "artist_uri": au} for (tu, au) in track_artists_set
-        ]
-        for i in range(0, len(ta_values), chunk_size):
-            chunk = ta_values[i : i + chunk_size]
-            stmt = (
-                pg_insert(track_artists)
-                .values(chunk)
-                .on_conflict_do_nothing(index_elements=["track_uri", "artist_uri"])
+        if parsed.track_artist_pairs:
+            logger.info(
+                "Inserting %d track-artist relationships...",
+                len(parsed.track_artist_pairs),
             )
-            session.execute(stmt)
+            ta_values = [
+                {"track_uri": tu, "artist_uri": au}
+                for tu, au in parsed.track_artist_pairs
+            ]
+            for i in range(0, len(ta_values), chunk_size):
+                chunk = ta_values[i : i + chunk_size]
+                stmt = (
+                    pg_insert(track_artists)
+                    .values(chunk)
+                    .on_conflict_do_nothing(index_elements=["track_uri", "artist_uri"])
+                )
+                session.execute(stmt)
 
-        # 4. Played History
-        logger.info("Inserting %d listening history records...", len(plays_list))
-        for i in range(0, len(plays_list), chunk_size):
-            chunk = plays_list[i : i + chunk_size]
-            stmt = (
-                pg_insert(PlayedHistory)
-                .values(chunk)
-                .on_conflict_do_nothing(constraint="unique_history_play")
-            )
-            session.execute(stmt)
+        # 4. Bulk Insert Listening History (Plays)
+        if parsed.plays:
+            logger.info("Inserting %d listening history records...", len(parsed.plays))
+            for i in range(0, len(parsed.plays), chunk_size):
+                chunk = parsed.plays[i : i + chunk_size]
+                stmt = (
+                    pg_insert(PlayedHistory)
+                    .values(chunk)
+                    .on_conflict_do_nothing(constraint="unique_history_play")
+                )
+                session.execute(stmt)
 
         session.commit()
+
     t1 = time.time()
     logger.info("Bulk database insert completed in %.2f seconds.", t1 - t0)
 
@@ -293,11 +322,8 @@ def main():
         target_path = Path(args.path).resolve()
     else:
         search_dirs = [
-            PROJECT_ROOT / "playground" / "Spotify Extended Streaming History",
-            PROJECT_ROOT / "playground" / "spotify_data",
-            PROJECT_ROOT / "test_data",
-            PROJECT_ROOT / "data",
-            PROJECT_ROOT,
+            "spotify_data",
+            "data",
         ]
         target_path = next(
             (d for d in search_dirs if d.exists() and len(list(d.glob("*.json"))) > 0),
