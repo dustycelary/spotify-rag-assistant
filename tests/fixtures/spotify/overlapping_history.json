@@ -1,0 +1,18 @@
+[
+  {
+    "ts": "2025-01-02T10:30:00Z",
+    "spotify_track_uri": "spotify:track:fictional001",
+    "master_metadata_track_name": "Glass Harbour",
+    "master_metadata_album_artist_name": "North Arcade",
+    "master_metadata_album_album_name": "Paper Moons",
+    "ms_played": 182000
+  },
+  {
+    "ts": "2025-01-02T18:00:00Z",
+    "spotify_track_uri": "spotify:track:fictional001",
+    "master_metadata_track_name": "Glass Harbour",
+    "master_metadata_album_artist_name": "North Arcade",
+    "master_metadata_album_album_name": "Paper Moons",
+    "ms_played": 182000
+  }
+]

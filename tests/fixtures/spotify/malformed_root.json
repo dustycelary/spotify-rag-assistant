@@ -1,0 +1,4 @@
+{
+  "error": "Invalid root structure, expected array of records",
+  "message": "Malformed root"
+}
