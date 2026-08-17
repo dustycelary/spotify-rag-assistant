@@ -93,16 +93,7 @@ def clean_slug(text: str) -> str:
 
 
 def generate_local_uri(entity_type: str, *components: str) -> str:
-    """Generates a canonical versioned local URI.
-
-    Steps:
-    1. Apply Unicode NFKC normalization to identity components.
-    2. Strip whitespace and case-fold for canonical identity.
-    3. Build a readable Unicode-safe slug.
-    4. Use `track` or `artist` if the readable part becomes empty.
-    5. Append 12 hexadecimal characters from SHA-256 of the full canonical identity.
-    6. Use versioned prefixes: spotify:<entity_type>:local:v1:<slug>:<hash_12>
-    """
+    """Generates a local URI."""
     canonical_parts = [
         unicodedata.normalize("NFKC", c).strip().casefold()
         for c in components
@@ -121,13 +112,7 @@ def generate_local_uri(entity_type: str, *components: str) -> str:
 
 
 def parse_timestamp(value: object) -> datetime | None:
-    """Parses various timestamp formats into UTC datetime object.
-
-    - Convert Z, positive offsets, and negative offsets to
-      timezone.utc using .astimezone(timezone.utc).
-    - Interpret YYYY-MM-DD HH:MM as UTC.
-    - Return None for blank, non-string, malformed, or impossible values.
-    """
+    """Parses various timestamp formats into UTC datetime object."""
     if not isinstance(value, str) or not value:
         return None
 
@@ -331,20 +316,6 @@ def main():
         )
 
     if not target_path or not target_path.exists():
-        print("\n=======================================================")
-        print("📥 SPOTIFY STREAMING HISTORY IMPORTER")
-        print("=======================================================")
-        print("No Spotify history JSON files specified or found.")
-        print("\nHow to use:")
-        print(" 1. Download your 'Extended Streaming History' from Spotify:")
-        print("    https://www.spotify.com/account/privacy/")
-        print(
-            " 2. Place your JSON files (endsong_*.json / Audio_*.json) in "
-            "'src/spotify_data/'"
-        )
-        print(" 3. Run this script:")
-        print("    python src/import_spotify_history.py --path src/spotify_data/")
-        print("    python src/import_spotify_history.py --reset")
         print("=======================================================\n")
         return
 
@@ -358,11 +329,6 @@ def main():
     print("=======================================================")
     print(f" Source Directory: {target_path}")
     print(f" Files Found:      {len(json_files)}")
-    if args.reset:
-        print(" Reset Database:   YES (all tables will be wiped)")
-    else:
-        print(" Reset Database:   NO (new records will be appended)")
-    print("=======================================================\n")
 
     # 1. Truncate tables if --reset
     if args.reset:
