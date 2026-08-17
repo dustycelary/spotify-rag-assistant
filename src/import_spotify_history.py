@@ -41,7 +41,8 @@ logging.basicConfig(
 logger = logging.getLogger("import_spotify_history")
 
 
-class NormalizedPlay:
+@dataclass
+class NormalisedPlay:
     track_uri: str
     title: str
     artist_name: str | None
@@ -59,13 +60,19 @@ class HistoryParseResult:
     plays: list[dict]
 
 
-def normalise_history_record(item: Mapping[str, object]) -> NormalizedPlay:
+def normalise_history_record(item: Mapping[str, object]) -> NormalisedPlay | None:
     """Normalises Spotify history record into a normalized play object."""
+
+    if not isinstance(item, dict):
+        return None
 
     track_uri = item.get("spotify_track_uri")
     track_name = item.get("master_metadata_track_name")
     artist_name = item.get("master_metadata_album_artist_name")
     album_name = item.get("master_metadata_album_album_name")
+
+    if not track_uri and track_name and artist_name:
+        track_uri = generate_local_uri("track", artist_name, track_name)
 
     if not track_uri:
         return None
@@ -73,11 +80,11 @@ def normalise_history_record(item: Mapping[str, object]) -> NormalizedPlay:
     ts_val = item.get("ts")
     ms_played = item.get("ms_played")
     played_at = parse_timestamp(ts_val)
-    if not played_at or not ms_played:
+    if not played_at or ms_played is None:
         return None
-    time_played = int(ms_played)
+    time_played = max(int(ms_played), 0)
 
-    return NormalizedPlay(
+    return NormalisedPlay(
         track_uri=track_uri,
         title=track_name or "Unknown Title",
         artist_name=artist_name,
@@ -93,7 +100,6 @@ def clean_slug(text: str) -> str:
 
 
 def generate_local_uri(entity_type: str, *components: str) -> str:
-    """Generates a local URI."""
     canonical_parts = [
         unicodedata.normalize("NFKC", c).strip().casefold()
         for c in components
@@ -181,14 +187,18 @@ def parse_spotify_history_files(json_files: list[Path]) -> HistoryParseResult:
             continue
 
         for item in data:
+            if not isinstance(item, dict):
+                continue
             result.total_records_read += 1
             norm = normalise_history_record(item)
+            if norm is None:
+                continue
 
             # Track entry
             if norm.track_uri not in result.tracks_by_uri:
                 result.tracks_by_uri[norm.track_uri] = {
                     "uri": norm.track_uri,
-                    "title": norm.track_name or "Unknown Title",
+                    "title": norm.title or "Unknown Title",
                     "album_name": norm.album_name,
                     "duration_ms": None,
                 }
@@ -208,6 +218,7 @@ def parse_spotify_history_files(json_files: list[Path]) -> HistoryParseResult:
                 {
                     "track_uri": norm.track_uri,
                     "played_at": norm.played_at,
+                    "playback_ms": norm.playback_ms,
                 }
             )
 
@@ -266,9 +277,17 @@ def bulk_insert_records(
 
         # 4. Bulk Insert Listening History (Plays)
         if parsed.plays:
+            play_values = [
+                {
+                    "track_uri": p["track_uri"],
+                    "played_at": p["played_at"],
+                    "played_time": p["playback_ms"],
+                }
+                for p in parsed.plays
+            ]
             logger.info("Inserting %d listening history records...", len(parsed.plays))
             for i in range(0, len(parsed.plays), chunk_size):
-                chunk = parsed.plays[i : i + chunk_size]
+                chunk = play_values[i : i + chunk_size]
                 stmt = (
                     pg_insert(PlayedHistory)
                     .values(chunk)
@@ -337,12 +356,10 @@ def main():
         init_db(engine)
 
     # 2. Parse JSON history files
-    total_records, tracks_dict, artists_dict, track_artists_set, plays_list = (
-        parse_spotify_history_files(json_files)
-    )
+    parsed = parse_spotify_history_files(json_files)
 
     # 3. Bulk insert to DB
-    bulk_insert_records(tracks_dict, artists_dict, track_artists_set, plays_list)
+    bulk_insert_records(parsed)
     enrichment_stats = run_post_import_enrichment(logger)
 
     # 4. Verification & Summary Report
@@ -354,7 +371,7 @@ def main():
     print("\n=======================================================")
     print("🎉 IMPORT COMPLETE!")
     print("=======================================================")
-    print(f" Total Records Read:  {total_records:,}")
+    print(f" Total Records Read:  {parsed.total_records_read:,}")
     print(f" Tracks in DB:        {db_tracks:,}")
     print(f" Artists in DB:       {db_artists:,}")
     print(f" Plays in DB:         {db_plays:,}")

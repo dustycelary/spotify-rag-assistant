@@ -47,12 +47,14 @@ def init_db(engine):
    SELECT 
        ph.id AS history_id,
        ph.played_at,
+       ph.played_time,
        t.uri AS track_uri,
        t.title AS track_title,
        t.album_name,
        t.release_date,
        t.popularity,
        ROUND(t.duration_ms / 1000.0, 1) AS duration_seconds,
+       ROUND(ph.played_time / 1000.0, 3) AS played_time_seconds,
        COALESCE(string_agg(DISTINCT a.name, ', '), 'Unknown Artist') AS artist_names,
        (SELECT string_agg(DISTINCT g, ', ')
         FROM track_artists ta_g
