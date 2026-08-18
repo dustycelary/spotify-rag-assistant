@@ -1,0 +1,90 @@
+[
+  {
+    "ts": "2025-01-02T10:30:00+00:00",
+    "spotify_track_uri": "spotify:track:fictional001",
+    "master_metadata_track_name": "Glass Harbour",
+    "master_metadata_album_artist_name": "North Arcade",
+    "master_metadata_album_album_name": "Paper Moons",
+    "ms_played": 182000
+  },
+  {
+    "ts": "2025-01-02T11:00:00+00:00",
+    "spotify_track_uri": null,
+    "master_metadata_track_name": "Echoes in Blue",
+    "master_metadata_album_artist_name": "Velvet Horizon",
+    "master_metadata_album_album_name": "Midnight Echoes",
+    "ms_played": 210000
+  },
+  {
+    "ts": "2025-01-02T11:30:00+00:00",
+    "spotify_track_uri": null,
+    "master_metadata_track_name": "夜空",
+    "master_metadata_album_artist_name": "星空",
+    "master_metadata_album_album_name": "夜の花",
+    "ms_played": 195000
+  },
+  {
+    "ts": "2025-01-02T12:00:00+00:00",
+    "spotify_track_uri": null,
+    "master_metadata_track_name": "Café",
+    "master_metadata_album_artist_name": "René",
+    "master_metadata_album_album_name": "Acoustic",
+    "ms_played": 180000
+  },
+  {
+    "ts": "2025-01-02T12:15:00+00:00",
+    "spotify_track_uri": null,
+    "master_metadata_track_name": "Cafe",
+    "master_metadata_album_artist_name": "Rene",
+    "master_metadata_album_album_name": "Acoustic",
+    "ms_played": 180000
+  },
+  {
+    "ts": "2025-01-02T13:00:00+00:00",
+    "spotify_track_uri": "spotify:track:fictional_notitle",
+    "master_metadata_track_name": null,
+    "master_metadata_album_artist_name": "Solo Artist",
+    "master_metadata_album_album_name": "Untitled Work",
+    "ms_played": 150000
+  },
+  {
+    "ts": "2025-01-02T14:00:00+00:00",
+    "spotify_track_uri": "spotify:track:fictional_noartist",
+    "master_metadata_track_name": "Anonymous Drift",
+    "master_metadata_album_artist_name": null,
+    "master_metadata_album_album_name": null,
+    "ms_played": 160000
+  },
+  {
+    "ts": "2025-01-02T15:00:00+00:00",
+    "spotify_track_uri": "spotify:track:fictional002",
+    "master_metadata_track_name": "Broken Echo",
+    "master_metadata_album_artist_name": "North Arcade",
+    "master_metadata_album_album_name": "Paper Moons",
+    "ms_played": -500
+  },
+  {
+    "ts": "not-a-datetime",
+    "spotify_track_uri": "spotify:track:fictional003",
+    "master_metadata_track_name": "Time Warp",
+    "master_metadata_album_artist_name": "Chrono",
+    "master_metadata_album_album_name": "Timeless",
+    "ms_played": 180000
+  },
+  {
+    "ts": "2025-01-02T16:30:00+00:00",
+    "spotify_track_uri": "spotify:track:fictional001",
+    "master_metadata_track_name": "Glass Harbour",
+    "master_metadata_album_artist_name": "North Arcade",
+    "master_metadata_album_album_name": "Paper Moons",
+    "ms_played": 182000
+  },
+  {
+    "ts": "2025-01-02T17:00:00+00:00",
+    "spotify_track_uri": null,
+    "master_metadata_track_name": null,
+    "master_metadata_album_artist_name": null,
+    "master_metadata_album_album_name": null,
+    "ms_played": 300000
+  }
+]

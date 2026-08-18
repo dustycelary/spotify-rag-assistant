@@ -24,6 +24,7 @@ class PlayedHistory(Base):
     context_type = Column(String(50))
     context_uri = Column(String(255))
     inserted_at = Column(DateTime, server_default=func.current_timestamp())
+    played_time = Column(Integer, nullable=False, default=0)
 
     # Relationships
     track = relationship("Track", back_populates="played_history")

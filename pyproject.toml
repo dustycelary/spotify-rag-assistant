@@ -12,6 +12,10 @@ ignore = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "unit",
+]
 
 [tool.coverage.run]
 branch = true
