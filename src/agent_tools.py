@@ -7,8 +7,12 @@ from typing import Any
 
 import dotenv
 import ollama
+import sqlglot
+from sqglot.optimizer.scope import build_scope
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
+from sqlglot import exp
+from sqlglot.errors import ParseError
 
 from src.agent_context import TOOLS, build_system_prompt
 from src.models.embedding import Embedding
@@ -33,18 +37,8 @@ NO_TOOL_RECOVERY = (
     "user-supplied musical qualities. For named-track similarity, use SQL first."
 )
 
-FORBIDDEN_RELATIONS = {
-    "artists",
-    "audio_features",
-    "embeddings",
-    "lyrics",
-    "played_history",
-    "tracks",
-    "track_artists",
-}
 
-
-def _field(value: Any, name: str, default: Any = None) -> Any:
+def get_val(value: Any, name: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(name, default)
     return getattr(value, name, default)
@@ -76,15 +70,15 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                 options=OLLAMA_OPTIONS,
                 keep_alive=OLLAMA_KEEP_ALIVE,
             )
-            msg = _field(response, "message")
+            msg = get_val(response, "message")
             if not msg:
                 return "No response could be generated."
 
             logger.info("Agent Turn %d/%d message: [%s]", turn, MAX_TOOL_TURNS, msg)
-            tool_calls = _field(msg, "tool_calls")
+            tool_calls = get_val(msg, "tool_calls")
 
             if not tool_calls:
-                content = _field(msg, "content", "") or ""
+                content = get_val(msg, "content", "") or ""
                 if successful_tool_calls == 0:
                     logger.warning(
                         "Turn %d provided no answerable tool evidence; "
@@ -111,9 +105,9 @@ def answer_question(question: str, session: Session, embed_model) -> str:
             )
             for tool_call in tool_calls:
                 total_tool_calls += 1
-                func_info = _field(tool_call, "function", {})
-                func_name = _field(func_info, "name")
-                raw_args = _field(func_info, "arguments", {})
+                func_info = get_val(tool_call, "function", {})
+                func_name = get_val(func_info, "name")
+                raw_args = get_val(func_info, "arguments", {})
 
                 try:
                     func_args = (
@@ -233,34 +227,89 @@ def clean_sql(raw: str) -> str:
     return sql
 
 
+def get_physical_tables(expression: exp.Expression) -> list[exp.Table]:
+    """Return a list of Table nodes that are not aliases."""
+    root_scope = build_scope(expression)
+    return [
+        src
+        for table in root_scope.traverse()
+        for _, (_, src) in table.selected_sources.items()
+        if isinstance(src, exp.Table)
+    ]
+
+
+def normalise_identifier(identifier) -> str:
+    if identifier is None:
+        return ""
+
+    value = identifier.name
+    if identifier.args.get("quoted"):
+        return value
+    return value.lower()
+
+
 def validate_sql(sql: str) -> str:
-    """Apply narrow structural checks before PostgreSQL's read-only enforcement."""
-    if not sql:
+    """Allow one read-only PostgreSQL query over v_listening_history."""
+    if not sql or not sql.strip():
         raise ValueError("SQL cannot be empty.")
 
-    without_comments = re.sub(r"/\*.*?\*/|--[^\n]*", " ", sql, flags=re.DOTALL)
-    # Mask quoted string contents so titles such as "Delete Me" and literal
-    # semicolons are not mistaken for SQL syntax.
-    structural_sql = re.sub(r"'(?:''|[^'])*'", "''", without_comments)
-    if ";" in structural_sql:
+    try:
+        statements = sqlglot.parse(sql, read="postgres")
+    except ParseError as exc:
+        raise ValueError("SQL could not be parsed.") from exc
+
+    if len(statements) != 1 or statements[0] is None:
         raise ValueError("Only one SQL statement is allowed.")
-    normalized = structural_sql.strip().lower()
-    if not re.match(r"^(select|with)\b", normalized):
+
+    expression = statements[0]
+
+    # SELECT, UNION, and queries carrying a WITH clause are Query expressions.
+    if not isinstance(expression, exp.Query) or expression.find(exp.Select) is None:
         raise ValueError("Only SELECT or WITH ... SELECT statements are allowed.")
-    if re.search(
-        r"\b(insert|update|delete|merge|drop|alter|create|truncate)\b", normalized
-    ):
+
+    forbidden_nodes = (
+        exp.Insert,
+        exp.Update,
+        exp.Delete,
+        exp.Merge,
+        exp.Create,
+        exp.Drop,
+        exp.Alter,
+        exp.Command,
+        exp.Copy,
+        exp.Into,
+    )
+    if any(isinstance(node, forbidden_nodes) for node in expression.walk()):
         raise ValueError("Data-changing SQL is not allowed.")
-    if not re.search(r"\bv_listening_history\b", normalized):
+
+    tables = get_physical_tables(expression)
+    if not tables:
         raise ValueError("Queries must reference v_listening_history.")
 
-    identifiers = set(re.findall(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*)", normalized))
-    forbidden = sorted(identifiers & FORBIDDEN_RELATIONS)
-    if forbidden:
+    invalid_relations = []
+    for table in tables:
+        table_name = normalise_identifier(table.this)
+        schema_name = normalise_identifier(table.args.get("db"))
+        catalog_name = normalise_identifier(table.args.get("catalog"))
+
+        allowed = (
+            table_name == "v_listening_history"
+            and schema_name in ("", "public")
+            and not catalog_name
+        )
+        if not allowed:
+            qualified_name = ".".join(
+                part for part in (catalog_name, schema_name, table_name) if part
+            )
+            invalid_relations.append(qualified_name)
+
+    if invalid_relations:
+        relations = ", ".join(sorted(set(invalid_relations)))
         raise ValueError(
             "Raw tables are unavailable; query only v_listening_history "
-            f"(found: {', '.join(forbidden)})."
+            f"(found: {relations})."
         )
+
     return sql
 
 
