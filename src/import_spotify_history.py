@@ -29,7 +29,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.db import SessionLocal, engine, init_db
-from src.import_enrichment import run_post_import_enrichment
+from src.import_enrichment import enrich_imports
 from src.models.artist import Artist
 from src.models.played_history import PlayedHistory
 from src.models.track import Track, track_artists
@@ -360,7 +360,7 @@ def main():
 
     # 3. Bulk insert to DB
     bulk_insert_records(parsed)
-    enrichment_stats = run_post_import_enrichment(logger)
+    enrichment_stats = enrich_imports(logger)
 
     # 4. Verification & Summary Report
     with SessionLocal() as session:

@@ -8,11 +8,11 @@ from typing import Any
 import dotenv
 import ollama
 import sqlglot
-from sqglot.optimizer.scope import build_scope
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 from sqlglot import exp
 from sqlglot.errors import ParseError
+from sqlglot.optimizer.scope import build_scope
 
 from src.agent_context import TOOLS, build_system_prompt
 from src.models.embedding import Embedding
@@ -98,8 +98,6 @@ def answer_question(question: str, session: Session, embed_model) -> str:
                 )
                 return content or "No response could be generated."
 
-            # Keep the tool calls but discard prose the model generated alongside
-            # them; it adds tokens without helping the next turn.
             messages.append(
                 {"role": "assistant", "content": "", "tool_calls": tool_calls}
             )
@@ -263,7 +261,7 @@ def validate_sql(sql: str) -> str:
 
     expression = statements[0]
 
-    # SELECT, UNION, and queries carrying a WITH clause are Query expressions.
+    # must be query or contain select to be valid
     if not isinstance(expression, exp.Query) or expression.find(exp.Select) is None:
         raise ValueError("Only SELECT or WITH ... SELECT statements are allowed.")
 
@@ -321,9 +319,6 @@ def run_structured_query(
     connection = session.connection()
     connection.exec_driver_sql(f"SET LOCAL statement_timeout = '{int(timeout_ms)}ms'")
     connection.exec_driver_sql("SET LOCAL default_transaction_read_only = ON")
-    # psycopg2 uses percent-based parameter markers even when no parameters are
-    # supplied. Escape lone wildcard characters before sending raw driver SQL;
-    # validation and any caller logging intentionally retain the readable SQL.
     driver_sql = re.sub(r"(?<!%)%(?!%)", "%%", sql)
     result = connection.exec_driver_sql(driver_sql)
     return [dict(row) for row in result.mappings().fetchmany(max_rows)]

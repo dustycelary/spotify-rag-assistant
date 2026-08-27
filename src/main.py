@@ -145,10 +145,12 @@ def main():
 
     if not log_console:
         os.environ["TQDM_DISABLE"] = "1"  # disables progress bars
-        # disables symlink symlink warnings from hugging Face
-        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-        # disables tokenizer deadlock warnings
-        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = (
+            "1"  # disables symlink symlink warnings from hugging Face
+        )
+        os.environ["TOKENIZERS_PARALLELISM"] = (
+            "false"  # disables tokenizer deadlock warnings
+        )
 
     log_path = Path("logs/app.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)

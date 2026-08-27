@@ -89,5 +89,4 @@ TOOLS = [
     },
 ]
 
-# Backwards-compatible snapshot for callers that import the constant directly.
 SYSTEM_PROMPT = build_system_prompt()

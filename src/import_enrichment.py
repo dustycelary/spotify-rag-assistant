@@ -16,11 +16,11 @@ from src.models.embedding import Embedding
 T = TypeVar("T")
 
 
-def _chunks(values: Sequence[T], size: int) -> list[list[T]]:
+def split_to_chunks(values: Sequence[T], size: int) -> list[list[T]]:
     return [list(values[i : i + size]) for i in range(0, len(values), size)]
 
 
-def _to_track_id(track_uri: str) -> str | None:
+def get_track_id(track_uri: str) -> str | None:
     prefix = "spotify:track:"
     if not track_uri or not track_uri.startswith(prefix):
         return None
@@ -31,6 +31,7 @@ def _to_track_id(track_uri: str) -> str | None:
 
 
 def get_spotify_client(logger: logging.Logger) -> spotipy.Spotify | None:
+    "Authorize user and return spotify client"
     client_id = os.environ.get("CLIENT_ID")
     client_secret = os.environ.get("CLIENT_SECRET")
     if not client_id or not client_secret:
@@ -51,7 +52,7 @@ def get_spotify_client(logger: logging.Logger) -> spotipy.Spotify | None:
         return None
 
 
-def enrich_audio_features(
+def get_missing_audio_features(
     logger: logging.Logger, batch_size: int = 100
 ) -> dict[str, int]:
     with SessionLocal() as session:
@@ -77,13 +78,13 @@ def enrich_audio_features(
     features_upserted = 0
 
     with SessionLocal() as session:
-        for uris_chunk in _chunks(list(missing_feature_uris), batch_size):
+        for uris_chunk in split_to_chunks(list(missing_feature_uris), batch_size):
             rows = []
             spotify_ids = []
             uri_to_chunk_map = {}
 
             for uri in uris_chunk:
-                track_id = _to_track_id(uri)
+                track_id = get_track_id(uri)
                 if track_id:
                     spotify_ids.append(track_id)
                     uri_to_chunk_map[track_id] = uri
@@ -99,7 +100,7 @@ def enrich_audio_features(
                     logger.warning("Spotify audio_features API fetch failed: %s", e)
 
             for uri in uris_chunk:
-                track_id = _to_track_id(uri)
+                track_id = get_track_id(uri)
                 feat = api_features_map.get(track_id) if track_id else None
                 if feat:
                     rows.append(
@@ -144,7 +145,7 @@ def enrich_audio_features(
     }
 
 
-def _embedding_text(row: dict) -> str:
+def format_track_for_embedding(row: dict) -> str:
     parts = [
         f"track {row.get('title') or 'unknown title'}",
         f"by {row.get('artist_names') or 'unknown artist'}",
@@ -211,8 +212,8 @@ def enrich_embeddings(
 
     embeddings_upserted = 0
     with SessionLocal() as session:
-        for rows_chunk in _chunks(list(rows), batch_size):
-            texts = [_embedding_text(row) for row in rows_chunk]
+        for rows_chunk in split_to_chunks(list(rows), batch_size):
+            texts = [format_track_for_embedding(row) for row in rows_chunk]
             vectors = model.encode(texts).tolist()
             insert_rows = [
                 {"track_uri": row["track_uri"], "embedding": vec}
@@ -234,8 +235,8 @@ def enrich_embeddings(
     }
 
 
-def run_post_import_enrichment(logger: logging.Logger) -> dict[str, int]:
-    audio_stats = enrich_audio_features(logger=logger)
+def enrich_imports(logger: logging.Logger) -> dict[str, int]:
+    audio_stats = get_missing_audio_features(logger=logger)
     embedding_stats = enrich_embeddings(logger=logger)
     stats = {**audio_stats, **embedding_stats}
     logger.info(
